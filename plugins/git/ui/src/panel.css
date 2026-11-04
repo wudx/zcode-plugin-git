@@ -26,7 +26,30 @@ body {
   font: 12px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
   overflow: hidden;
 }
-[data-theme="light"] { --git-bg: #ffffff; }
+[data-theme="light"] {
+  --git-bg: #ffffff;
+  --syn-kw: #cf222e;
+  --syn-str: #0a3069;
+  --syn-com: #6e7781;
+  --syn-num: #0550ae;
+  --syn-fn: #8250df;
+  --syn-type: #953800;
+}
+/* diff 语法高亮 token 色（GitHub 深浅两套；浅色覆盖见 [data-theme="light"]） */
+body {
+  --syn-kw: #ff7b72;
+  --syn-str: #a5d6ff;
+  --syn-com: #8b949e;
+  --syn-num: #79c0ff;
+  --syn-fn: #d2a8ff;
+  --syn-type: #ffa657;
+}
+.tk-kw { color: var(--syn-kw); }
+.tk-str { color: var(--syn-str); }
+.tk-com { color: var(--syn-com); }
+.tk-num { color: var(--syn-num); }
+.tk-fn { color: var(--syn-fn); }
+.tk-type { color: var(--syn-type); }
 
 #fatal {
   margin: 12px;
@@ -265,6 +288,7 @@ body {
 }
 .diff > .dl-add[data-ln]::before { background: linear-gradient(#3fb96826, #3fb96826), var(--git-bg-soft); }
 .diff > .dl-del[data-ln]::before { background: linear-gradient(#f2555a26, #f2555a26), var(--git-bg-soft); }
+.dl-ctx { display: block; color: var(--git-fg); padding: 0 8px; }
 .dl-add { display: block; background: #3fb96826; color: var(--git-fg); padding: 0 8px; }
 .dl-del { display: block; background: #f2555a26; color: var(--git-fg); padding: 0 8px; }
 .dl-hunk { display: block; color: var(--git-ren); padding: 0 8px; }

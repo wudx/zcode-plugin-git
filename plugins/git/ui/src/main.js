@@ -730,7 +730,7 @@ function diffEl(key) {
     box.appendChild(p);
     return box;
   }
-  box.appendChild(splitDiff ? splitView(d.text) : unifiedView(d.text));
+  box.appendChild(splitDiff ? splitView(d.text, extLang(info.entry.path)) : unifiedView(d.text, extLang(info.entry.path)));
   // 无增删行（如纯文件模式变更）时禁用跳转按钮
   if (chgBtns) {
     const anyChg = box.querySelector(".chg-start") !== null;
@@ -795,7 +795,7 @@ function attachMinimap(box) {
       if (span.classList.contains("dl-add")) color = C.add;
       else if (span.classList.contains("dl-del")) color = C.del;
       else if (span.classList.contains("dl-hunk")) color = C.hunk;
-      else if (txt.startsWith(" ")) color = C.ctx; // 上下文行与文件头同为 dl-meta，按内容区分
+      else if (span.classList.contains("dl-ctx")) color = C.ctx;
       pushBar(txt, color, 3, 80);
     }
   } else {
@@ -868,39 +868,194 @@ function attachMinimap(box) {
   update();
 }
 
-function unifiedView(text) {
+// ---------------------------------------------------------------------------
+// diff 代码高亮：轻量正则分词（无第三方依赖），产出区间由 renderCode
+// 合并转义为一层 HTML。
+// ---------------------------------------------------------------------------
+
+const SYN_LANG_BY_EXT = {
+  js: "js", mjs: "js", cjs: "js", jsx: "js", ts: "js", tsx: "js",
+  json: "json", css: "css", scss: "css", less: "css",
+  py: "py", pyw: "py", sh: "sh", bash: "sh", zsh: "sh",
+  go: "go", rs: "rs", md: "md", markdown: "md",
+  html: "html", xml: "html", vue: "html", svg: "html",
+  java: "clike", kt: "clike", c: "clike", h: "clike", cpp: "clike",
+  cc: "clike", hpp: "clike", cs: "clike", swift: "clike",
+};
+
+function extLang(path) {
+  const m = /\.([a-z0-9]+)$/i.exec(path || "");
+  return m ? SYN_LANG_BY_EXT[m[1].toLowerCase()] || null : null;
+}
+
+const SYN_KW = {
+  js: "break case catch class const continue debugger default delete do else export extends finally for function if import in instanceof let new of return static super switch this throw try typeof var void while with yield async await get set",
+  json: "true false null",
+  py: "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield match case True False None",
+  sh: "if then else elif fi for while do done case esac function return in select until time coproc echo cd exit set unset export local readonly shift source alias unalias",
+  go: "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false iota",
+  rs: "as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod mut pub ref return self Self static struct super trait true type unsafe use where while",
+  clike: "abstract as base bool break byte case catch char class const continue decimal default delegate do double dynamic else enum event explicit extern false finally fixed float for foreach get goto if implicit in int interface internal is lock long namespace new null object operator out override params partial private protected public readonly ref return sbyte sealed set short sizeof stackalloc static string struct switch this throw true try typeof uint ulong unchecked unsafe ushort using virtual void volatile when where while var func let",
+};
+for (const k of Object.keys(SYN_KW)) SYN_KW[k] = new Set(SYN_KW[k].split(" "));
+
+// 各语言分词正则：组序即优先级（注释/字符串在前，防止 "#include" 之类被吃掉）；
+// clike/go/rs/json 与 js 共用同一组序。组的语义见 SYN_GROUPS。
+const SYN_RES = {
+  js: /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|\/\*[\s\S]*$)|(`(?:[^`\\]|\\.)*`|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(\b0[xXbBoO][\da-fA-F_]+\b|\b\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?\d+)?\b)|([A-Za-z_$][\w$]*)/g,
+  py: /(#[^\n]*)|([rbfu]{0,2}"(?:[^"\\\n]|\\.)*"|[rbfu]{0,2}'(?:[^'\\\n]|\\.)*'|"""[\s\S]*?"""|'''[\s\S]*?''')|(\b0[xX][\da-fA-F]+\b|\b\d[\d_]*(?:\.[\d_]*)?(?:[eE][+-]?\d+)?\b)|([A-Za-z_][\w]*)/g,
+  sh: /(#[^\n]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(\$\{\w+\}|\$\w+)|(\b\d+\b)|([A-Za-z_][\w]*)/g,
+  css: /(\/\*[\s\S]*?\*\/|\/\*[\s\S]*$)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|(@[\w-]+)|(#[0-9a-fA-F]{3,8}\b)|(-?\d[\d.]*(?:px|em|rem|vh|vw|vmin|vmax|s|ms|deg|fr|ch|pt|%)*\b)|([a-zA-Z-]+(?=\s*:))|(#[\w-]+|--[\w-]+)/g,
+  html: /(<!--)|(<\/?[a-zA-Z][\w-]*)|("(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')|([a-zA-Z-]+)(?==)|(\/?>)/g,
+};
+const SYN_GROUPS = {
+  js: ["com", "str", "num", "id"],
+  py: ["com", "str", "num", "id"],
+  sh: ["com", "str", "type", "num", "id"], // $变量 用 type 色
+  css: ["com", "str", "kw", "num", "num", "kw", "str"],
+  html: ["com", "fn", "str", "type", ""],
+};
+
+function escHtml(s) {
+  return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
+}
+
+function synNextNonSpace(line, i) {
+  while (line[i] === " " || line[i] === "\t") i += 1;
+  return line[i];
+}
+
+/** 把一行代码扫成 [start, end, cls] 区间；st.block 跨行跟踪块注释与 md 围栏状态 */
+function synScan(line, lang, st, out) {
+  if (!lang) return;
+  if (lang === "md") { synScanMd(line, st, out); return; }
+  let i = 0;
+  if (st && st.block) { // 上一行未闭合的块注释/HTML 注释
+    const mark = lang === "html" ? "-->" : "*/";
+    const close = line.indexOf(mark);
+    if (close === -1) { out.push([0, line.length, "com"]); return; }
+    out.push([0, close + mark.length, "com"]);
+    i = close + mark.length;
+    st.block = false;
+  }
+  if (lang === "html") { synScanHtml(line, i, st, out); return; }
+  const res = SYN_RES[lang === "clike" || lang === "go" || lang === "rs" || lang === "json" ? "js" : lang];
+  const groups = SYN_GROUPS[lang === "clike" || lang === "go" || lang === "rs" || lang === "json" ? "js" : lang];
+  if (!res) return;
+  res.lastIndex = i;
+  for (let m = res.exec(line); m; m = res.exec(line)) {
+    let gi = 0;
+    for (let g = 1; g < m.length; g += 1) if (m[g] !== undefined) { gi = g; break; }
+    const cls = groups[gi - 1];
+    const end = m.index + m[0].length;
+    if (cls === "com") {
+      out.push([m.index, end, "com"]);
+      if (m[0].startsWith("/*") && !m[0].endsWith("*/")) st.block = true; // 未闭合块注释延续到下一行
+    } else if (cls === "str") {
+      // json 里后跟 ":" 的字符串是键，用数字色区分
+      out.push([m.index, end, lang === "json" && synNextNonSpace(line, end) === ":" ? "num" : "str"]);
+    } else if (cls === "id") {
+      const word = m[0];
+      if (SYN_KW[lang]?.has(word)) out.push([m.index, end, "kw"]);
+      else if (synNextNonSpace(line, end) === "(") out.push([m.index, end, "fn"]);
+      else if (/^[A-Z]/.test(word)) out.push([m.index, end, "type"]);
+    } else if (cls) {
+      out.push([m.index, end, cls]);
+    }
+  }
+}
+
+function synScanHtml(line, from, st, out) {
+  const res = SYN_RES.html;
+  res.lastIndex = from;
+  for (let m = res.exec(line); m; m = res.exec(line)) {
+    const end = m.index + m[0].length;
+    if (m[1]) { // 注释开：找同行闭合，否则整行入注释并延续
+      const close = line.indexOf("-->", end);
+      if (close === -1) { out.push([m.index, line.length, "com"]); st.block = true; return; }
+      out.push([m.index, close + 3, "com"]);
+      res.lastIndex = close + 3;
+    } else {
+      const cls = SYN_GROUPS.html[m.findIndex((g, x) => x > 0 && g !== undefined) - 1];
+      if (cls) out.push([m.index, end, cls]);
+    }
+  }
+}
+
+function synScanMd(line, st, out) {
+  if (st.fence || /^\s*(```|~~~)/.test(line)) {
+    if (st.fence && /^\s*(```|~~~)\s*$/.test(line)) st.fence = false;
+    else if (!st.fence) st.fence = true;
+    out.push([0, line.length, "str"]);
+    return;
+  }
+  if (/^#{1,6}\s/.test(line)) { out.push([0, line.length, "kw"]); return; }
+  const re = /(`+[^`\n]*`+)|(\*\*[^*\n]+\*\*)|(\[[^\]\n]*\]\([^)\n]*\))|(https?:\/\/[^\s)]+)/g;
+  for (let m = re.exec(line); m; m = re.exec(line)) {
+    out.push([m.index, m.index + m[0].length, m[1] ? "str" : m[2] ? "type" : "num"]);
+  }
+}
+
+/** 语法区间渲染为转义 HTML */
+function renderCode(text, lang, st) {
+  if (text === "") return " "; // 空行用空格撑出行高
+  const syn = [];
+  synScan(text, lang, st, syn);
+  const pts = new Set([0, text.length]);
+  for (const [s, e] of syn) { pts.add(s); pts.add(e); }
+  const sorted = [...pts].sort((a, b) => a - b);
+  let html = "";
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const s = sorted[i];
+    const e = sorted[i + 1];
+    if (s >= e) continue;
+    const tk = syn.find(([a, b]) => a <= s && b >= e);
+    const seg = escHtml(text.slice(s, e));
+    html += tk ? `<span class="tk-${tk[2]}">${seg}</span>` : seg;
+  }
+  return html;
+}
+
+function unifiedView(text, lang) {
   const pre = document.createElement("pre");
   pre.className = "diff";
   // 行元素在 CSS 里是 display:block，自带换行；这里不能再补 "\n" 文本节点，
   // 否则 pre(white-space:pre) 下每行后都会多出一个空行
   const lines = text.split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  const items = lines.map((line) => ({ line, cls: diffLineClass(line) }));
+  // 语法状态按文件分列：删除行走旧文件，新增/上下文行走新文件
+  const stOld = lang ? { block: false } : null;
+  const stNew = lang ? { block: false } : null;
   let prevChg = false;
   let oldNo = null;
   let newNo = null;
-  for (const line of lines) {
+  for (const it of items) {
     const span = document.createElement("span");
-    span.className = diffLineClass(line);
-    span.textContent = line || " "; // 空行用空格撑出行高
+    span.className = it.cls;
+    if (it.cls === "dl-ctx" || it.cls === "dl-add" || it.cls === "dl-del") {
+      span.innerHTML = renderCode(it.line, lang, it.cls === "dl-del" ? stOld : stNew);
+    } else {
+      span.textContent = it.line || " "; // 空行用空格撑出行高
+    }
     // 行号沟槽：删除行显示旧文件行号，新增/上下文行显示新文件行号（GitHub 统一视图样式）；
-    // 走 data-ln + CSS ::before 渲染，textContent 保持纯代码，迷你地图解析不受影响
-    const hm = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    // 走 data-ln + CSS ::before 渲染，行内嵌套 span 不改变 textContent，迷你地图解析不受影响
+    const hm = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(it.line);
     if (hm) {
       oldNo = Number.parseInt(hm[1], 10);
       newNo = Number.parseInt(hm[2], 10);
-    } else if (line.startsWith("+")) {
+    } else if (it.cls === "dl-add") {
       span.dataset.ln = newNo ?? "";
       if (newNo !== null) newNo += 1;
-    } else if (line.startsWith("-")) {
+    } else if (it.cls === "dl-del") {
       span.dataset.ln = oldNo ?? "";
       if (oldNo !== null) oldNo += 1;
-    } else if (!line.startsWith("\\") && !line.startsWith("diff ") && !line.startsWith("index ") &&
-               !line.startsWith("--- ") && !line.startsWith("+++ ")) {
+    } else if (it.cls === "dl-ctx") {
       span.dataset.ln = newNo ?? ""; // 上下文行
       if (oldNo !== null) oldNo += 1;
       if (newNo !== null) newNo += 1;
     }
-    const chg = span.className === "dl-add" || span.className === "dl-del";
+    const chg = it.cls === "dl-add" || it.cls === "dl-del";
     if (chg && !prevChg) span.classList.add("chg-start"); // 每段连续增删行的首行，供上/下一个更改跳转
     prevChg = chg;
     pre.appendChild(span);
@@ -911,9 +1066,10 @@ function unifiedView(text) {
 function diffLineClass(line) {
   if (line.startsWith("@@")) return "dl-hunk";
   if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ")) return "dl-meta";
+  if (line.startsWith("\\")) return "dl-meta"; // "\ No newline at end of file"
   if (line.startsWith("+")) return "dl-add";
   if (line.startsWith("-")) return "dl-del";
-  return "dl-meta";
+  return "dl-ctx"; // 上下文行：与文件头同为信息行，但需按代码渲染，单独成类
 }
 
 /**
@@ -975,13 +1131,22 @@ function parseSplitRows(text) {
   return rows;
 }
 
-function splitView(text) {
+function splitView(text, lang) {
   const grid = document.createElement("div");
   grid.className = "split-grid";
   const cell = (cls, txt) => {
     const s = document.createElement("span");
     s.className = cls;
     s.textContent = txt === "" || txt == null ? " " : txt;
+    return s;
+  };
+  // 代码格走语法高亮；左右两列各自维护语法状态（分属旧/新文件）
+  const stL = lang ? { block: false } : null;
+  const stR = lang ? { block: false } : null;
+  const codeCell = (cls, txt, st) => {
+    const s = document.createElement("span");
+    s.className = cls;
+    s.innerHTML = renderCode(txt == null ? "" : txt, lang, st);
     return s;
   };
   parseSplitRows(text).forEach((row) => {
@@ -994,9 +1159,9 @@ function splitView(text) {
     const lNum = cell("cell-num", row.left === null ? "" : row.left.no ?? "");
     if (row.chgStart) lNum.classList.add("chg-start"); // 每段连续增删行的首行，供上/下一个更改跳转
     grid.appendChild(lNum);
-    grid.appendChild(cell("cell-code" + lTone, row.left === null ? "" : row.left.text));
+    grid.appendChild(codeCell("cell-code" + lTone, row.left === null ? "" : row.left.text, stL));
     grid.appendChild(cell("cell-num num-r", row.right === null ? "" : row.right.no ?? ""));
-    grid.appendChild(cell("cell-code" + rTone, row.right === null ? "" : row.right.text));
+    grid.appendChild(codeCell("cell-code" + rTone, row.right === null ? "" : row.right.text, stR));
   });
   const scroll = document.createElement("div");
   scroll.className = "split-scroll";
