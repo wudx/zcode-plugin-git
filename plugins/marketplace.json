@@ -4,7 +4,7 @@
     {
       "name": "git",
       "source": "./git",
-      "version": "0.3.7",
+      "version": "0.4.5",
       "description": "Git workbench side panel: review staged and working-tree changes (list/tree, unified/side-by-side diff), stage/unstage/discard, pull, stash, commit, and AI commit messages.",
       "displayName": "Git 工具",
       "displayName_i18n": {

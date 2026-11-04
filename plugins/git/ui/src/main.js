@@ -26,6 +26,8 @@ const STR = {
     cancel: "取消",
     stageAll: "全部暂存",
     unstageAll: "全部取消暂存",
+    discardAll: "全部撤销",
+    confirmDiscardAll: "确认全部撤销?",
     commit: "提交",
     aiGenerate: "AI 生成",
     commitPlaceholder: "输入提交信息，首行为标题…",
@@ -85,6 +87,8 @@ const STR = {
     cancel: "Cancel",
     stageAll: "Stage all",
     unstageAll: "Unstage all",
+    discardAll: "Discard all",
+    confirmDiscardAll: "Discard all changes?",
     commit: "Commit",
     aiGenerate: "AI Generate",
     commitPlaceholder: "Commit message, subject on the first line…",
@@ -733,7 +737,135 @@ function diffEl(key) {
     chgBtns[0].disabled = !anyChg;
     chgBtns[1].disabled = !anyChg;
   }
+  // 迷你地图由调用方在挂载后同步调用 attachMinimap（不依赖 rAF：后台不可见时帧回调被暂停）
   return box;
+}
+
+/**
+ * diff 迷你地图（仿 VS Code）：滚动区右侧按行绘制彩色缩略条
+ * （增=绿、删=红、上下文=灰、hunk=蓝），叠加视口指示块，随滚动同步；
+ * 点击/拖动地图直接滚动。内容不溢出时也显示（视口铺满整条，点击无操作），保持布局统一。
+ */
+function attachMinimap(box) {
+  if (!box.isConnected) return;
+  const view = box.querySelector(".diff, .split-scroll");
+  if (!view) return;
+  const doc = view.ownerDocument;
+  const MAP_W = 40;
+  const map = doc.createElement("div");
+  map.className = "minimap";
+  const canvas = doc.createElement("canvas");
+  const ind = doc.createElement("div");
+  ind.className = "minimap-view";
+  map.appendChild(canvas);
+  map.appendChild(ind);
+
+  const dpr = doc.defaultView.devicePixelRatio || 1;
+  const mapH = view.clientHeight;
+  canvas.width = Math.round(MAP_W * dpr);
+  canvas.height = Math.round(mapH * dpr);
+  canvas.style.width = MAP_W + "px";
+  canvas.style.height = mapH + "px";
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.scale(dpr, dpr);
+
+  // 主题色：canvas 读不了 CSS 变量，取计算值
+  const cs = getComputedStyle(doc.documentElement);
+  const vc = (n, fb) => (cs.getPropertyValue(n) || "").trim() || fb;
+  const C = {
+    add: vc("--git-add", "#3fb968"),
+    del: vc("--git-del", "#f2555a"),
+    hunk: vc("--git-ren", "#58a6ff"),
+    meta: vc("--git-fg-dim", "#9d9da7"),
+    ctx: vc("--git-fg-dim", "#9d9da7"),
+  };
+
+  // 收集缩略条：indent/len 为字符列，x0+cols 约束绘制区间（并排视图分左右两半）
+  const bars = [];
+  const pushBar = (text, color, x0, cols) => {
+    const t = text.trim();
+    if (!t) return;
+    bars.push({ indent: text.length - text.replace(/^\s+/, "").length, len: t.length, color, x0, cols });
+  };
+  if (view.classList.contains("diff")) {
+    for (const span of view.children) {
+      const txt = span.textContent;
+      let color = C.meta;
+      if (span.classList.contains("dl-add")) color = C.add;
+      else if (span.classList.contains("dl-del")) color = C.del;
+      else if (span.classList.contains("dl-hunk")) color = C.hunk;
+      else if (txt.startsWith(" ")) color = C.ctx; // 上下文行与文件头同为 dl-meta，按内容区分
+      pushBar(txt, color, 3, 80);
+    }
+  } else {
+    const ch = [...view.querySelector(".split-grid").children];
+    const halfW = (MAP_W - 6) / 2;
+    for (let i = 0; i < ch.length; ) {
+      if (ch[i].classList.contains("cell-span")) {
+        pushBar(ch[i].textContent, ch[i].classList.contains("dl-hunk") ? C.hunk : C.meta, 3, 120);
+        i += 1;
+        continue;
+      }
+      pushBar(ch[i + 1]?.textContent ?? "", ch[i + 1]?.classList.contains("cell-del") ? C.del : C.ctx, 3, 60);
+      pushBar(ch[i + 3]?.textContent ?? "", ch[i + 3]?.classList.contains("cell-add") ? C.add : C.ctx, 3 + halfW, 60);
+      i += 4;
+    }
+  }
+  if (bars.length === 0) return;
+
+  let rowH = Math.min(3, mapH / bars.length);
+  if (bars.length * rowH > mapH) rowH = mapH / bars.length; // 行数过多时整体压缩
+  const barH = Math.max(0.7, rowH * 0.7);
+  const mapContentH = bars.length * rowH;
+  ctx.globalAlpha = 0.8;
+  bars.forEach((b, i) => {
+    const colW = (MAP_W - 6) / b.cols;
+    const x = b.x0 + Math.min(b.indent, b.cols) * colW;
+    const w = Math.max(2, Math.min(b.len, b.cols - Math.min(b.indent, b.cols)) * colW);
+    ctx.fillStyle = b.color;
+    ctx.fillRect(x, i * rowH, w, barH);
+  });
+
+  const scrollable = view.scrollHeight - view.clientHeight > 2;
+  map.style.cursor = scrollable ? "pointer" : "default";
+  const update = () => {
+    ind.style.top = (view.scrollTop / view.scrollHeight) * mapContentH + "px";
+    ind.style.height = Math.min(mapContentH, Math.max(14, (view.clientHeight / view.scrollHeight) * mapContentH)) + "px";
+  };
+  view.addEventListener("scroll", update, { passive: true });
+
+  // 点击/拖动：点击点按比例映射到内容位置并居中视口
+  const seek = (clientY) => {
+    const r = map.getBoundingClientRect();
+    const target = ((clientY - r.top) / mapContentH) * view.scrollHeight - view.clientHeight / 2;
+    view.scrollTop = Math.max(0, Math.min(target, view.scrollHeight - view.clientHeight));
+  };
+  map.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    try {
+      map.setPointerCapture(e.pointerId);
+    } catch {
+      // 合成事件等无有效指针 id 时忽略，拖动退化为仅点击定位
+    }
+    seek(e.clientY);
+    const move = (ev) => seek(ev.clientY);
+    const up = () => {
+      map.removeEventListener("pointermove", move);
+      map.removeEventListener("pointerup", up);
+      map.removeEventListener("pointercancel", up);
+    };
+    map.addEventListener("pointermove", move);
+    map.addEventListener("pointerup", up);
+    map.addEventListener("pointercancel", up);
+  });
+
+  // 给地图让位，原生滚动条随之内移
+  view.style.marginRight = MAP_W + 6 + "px";
+  map.style.top = view.offsetTop + "px";
+  map.style.height = mapH + "px";
+  box.appendChild(map);
+  update();
 }
 
 function unifiedView(text) {
@@ -744,10 +876,30 @@ function unifiedView(text) {
   const lines = text.split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   let prevChg = false;
+  let oldNo = null;
+  let newNo = null;
   for (const line of lines) {
     const span = document.createElement("span");
     span.className = diffLineClass(line);
     span.textContent = line || " "; // 空行用空格撑出行高
+    // 行号沟槽：删除行显示旧文件行号，新增/上下文行显示新文件行号（GitHub 统一视图样式）；
+    // 走 data-ln + CSS ::before 渲染，textContent 保持纯代码，迷你地图解析不受影响
+    const hm = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hm) {
+      oldNo = Number.parseInt(hm[1], 10);
+      newNo = Number.parseInt(hm[2], 10);
+    } else if (line.startsWith("+")) {
+      span.dataset.ln = newNo ?? "";
+      if (newNo !== null) newNo += 1;
+    } else if (line.startsWith("-")) {
+      span.dataset.ln = oldNo ?? "";
+      if (oldNo !== null) oldNo += 1;
+    } else if (!line.startsWith("\\") && !line.startsWith("diff ") && !line.startsWith("index ") &&
+               !line.startsWith("--- ") && !line.startsWith("+++ ")) {
+      span.dataset.ln = newNo ?? ""; // 上下文行
+      if (oldNo !== null) oldNo += 1;
+      if (newNo !== null) newNo += 1;
+    }
     const chg = span.className === "dl-add" || span.className === "dl-del";
     if (chg && !prevChg) span.classList.add("chg-start"); // 每段连续增删行的首行，供上/下一个更改跳转
     prevChg = chg;
@@ -889,9 +1041,12 @@ function render() {
   $("worktree-empty").hidden = unstaged.length > 0;
   $("clean").hidden = staged.length + unstaged.length > 0;
 
-  // 分区头部的「全部暂存 / 全部取消暂存」（悬停浮现的图标按钮）
+  // 分区头部的「全部暂存 / 全部取消暂存 / 全部撤销」（悬停浮现的图标按钮）
+  $("staged-all").replaceChildren();
+  $("worktree-all").replaceChildren();
   mkAllButton($("staged-all"), ICONS.minus, t.unstageAll, staged.map((e) => e.path), "git_unstage");
   mkAllButton($("worktree-all"), ICONS.plus, t.stageAll, unstaged.map((e) => e.path), "git_stage");
+  mkAllButton($("worktree-all"), ICONS.undo, t.discardAll, unstaged.map((e) => e.path), "git_discard", true);
 
   const sList = $("staged-list");
   const wList = $("worktree-list");
@@ -907,7 +1062,9 @@ function render() {
     const row = document.querySelector(`.row[data-key="${CSS.escape(key)}"]`);
     if (!row) continue;
     row.classList.add("expanded");
-    row.after(diffEl(key));
+    const dBox = diffEl(key);
+    row.after(dBox);
+    attachMinimap(dBox); // 挂载后同步挂迷你地图（布局读取会强制同步排版，不依赖帧回调）
     if (info.loading && !info.pending) {
       info.pending = true;
       callTool("git_diff", { path: info.entry.path, staged: info.staged, ...scopeArgs(info.scope) })
@@ -936,19 +1093,49 @@ function render() {
   renderStashMenu();
 }
 
-function mkAllButton(box, icon, label, paths, tool) {
-  box.replaceChildren();
+function mkAllButton(box, icon, label, paths, tool, needConfirm = false) {
+  // 每个按钮独占一个 slot，同一分区头可放多个批量按钮（容器由 render 清空）
+  const slot = document.createElement("span");
+  slot.style.display = "inline-flex";
+  slot.style.gap = "4px";
+  box.appendChild(slot);
   if (!paths.length) return;
-  const b = document.createElement("button");
-  b.className = "btn icon";
-  b.innerHTML = icon;
-  b.title = label;
-  b.setAttribute("aria-label", label);
-  b.addEventListener("click", (e) => {
-    e.stopPropagation();
-    runAction(() => callTool(tool, { paths }));
+  const run = () => runAction(() => callTool(tool, { paths }));
+  // 危险操作（全部撤销）走行内二次确认：问题文案 + 确认按钮，Esc/失焦取消
+  const showConfirm = () => {
+    const q = document.createElement("span");
+    q.className = "confirm-q";
+    q.textContent = t.confirmDiscardAll;
+    const yes = document.createElement("button");
+    yes.className = "btn danger";
+    yes.textContent = t.confirmYes;
+    yes.addEventListener("click", (e) => {
+      e.stopPropagation();
+      run();
+    });
+    yes.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") showIcon();
+    });
+    slot.replaceChildren(q, yes);
+    yes.focus();
+  };
+  const showIcon = () => {
+    const b = document.createElement("button");
+    b.className = "btn icon";
+    b.innerHTML = icon;
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    b.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (needConfirm) showConfirm();
+      else run();
+    });
+    slot.replaceChildren(b);
+  };
+  slot.addEventListener("focusout", (e) => {
+    if (!slot.contains(e.relatedTarget)) showIcon();
   });
-  box.appendChild(b);
+  showIcon();
 }
 
 function toggleDiff(row, entry, staged) {

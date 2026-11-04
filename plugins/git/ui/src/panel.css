@@ -121,7 +121,7 @@ body {
   gap: 4px;
 }
 /* 分区批量操作：悬停/聚焦分区标题时浮现 */
-.sec-actions { display: inline-flex; opacity: 0; transition: opacity 0.15s; }
+.sec-actions { display: inline-flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
 .section-h:hover .sec-actions,
 .section-h:focus-within .sec-actions { opacity: 1; }
 #clean, .section-empty {
@@ -246,6 +246,17 @@ body {
   overflow: auto;
   font: 11px/1.55 var(--mono);
   white-space: pre;
+}
+/* 统一视图行号沟槽：::before 渲染 data-ln，行元素 textContent 保持纯代码 */
+.diff > span::before {
+  content: attr(data-ln);
+  display: inline-block;
+  width: 3em;
+  margin-right: 6px;
+  text-align: right;
+  color: inherit;
+  opacity: 0.55;
+  user-select: none;
 }
 .dl-add { display: block; background: #3fb96818; color: #6fce8e; padding: 0 8px; }
 .dl-del { display: block; background: #f2555a18; color: #ff8b8e; padding: 0 8px; }
@@ -438,6 +449,26 @@ body {
 .cell-del { background: #f2555a18; color: #ff8b8e; }
 .cell-add { background: #3fb96818; color: #6fce8e; }
 .cell-span { grid-column: 1 / -1; white-space: pre; padding: 0 8px; }
+
+/* diff 迷你地图（仿 VS Code）：右侧缩略行条 + 视口指示块 */
+.minimap {
+  position: absolute;
+  right: 3px;
+  width: 40px;
+  cursor: pointer;
+  z-index: 2;
+  border-radius: 3px;
+}
+.minimap:hover { background: rgba(127, 127, 127, 0.08); }
+.minimap-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: rgba(127, 127, 127, 0.18);
+  border: 1px solid rgba(127, 127, 127, 0.35);
+  border-radius: 2px;
+  pointer-events: none;
+}
 
 /* custom AI prompt */
 #prompt-area {

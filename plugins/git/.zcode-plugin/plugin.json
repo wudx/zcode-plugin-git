@@ -1,6 +1,6 @@
 {
   "name": "git",
-  "version": "0.3.7",
+  "version": "0.4.5",
   "description": "Git workbench side panel: review staged and working-tree changes (list or tree view, unified or side-by-side diff), stage/unstage/discard files, pull, stash, commit, and preview modified images side-by-side (old vs new), pull, stash, commit, and generate AI commit messages with a custom prompt.",
   "description_i18n": {
     "en": "Git workbench side panel: review staged and working-tree changes with list/tree views and unified/side-by-side diffs, stage/unstage/discard files, pull, stash (push/pop/apply), write and run commits, and generate AI commit messages with an optional custom prompt.",
