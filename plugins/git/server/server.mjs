@@ -8,10 +8,54 @@ import { spawn } from "node:child_process";
 import { stat, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { IMAGE_MIME } from "../../shared/images.js";
 
 const PLUGIN_NAME = "git";
-const VERSION = "0.3.3";
+const VERSION = __APP_VERSION__; // 构建时由 build.mjs 注入 plugin.json 的版本
 const PANEL_URI = `ui://${PLUGIN_NAME}/panel.html`;
+
+// ---------------------------------------------------------------------------
+// tool protocol：错误码随结果结构化下发，面板 UI 按 code 判定而非匹配文案
+// ---------------------------------------------------------------------------
+
+// NOT_A_REPO  当前目录不是 Git 仓库（resolveRepo）
+// GIT_MISSING 未找到 git 可执行文件（runGit ENOENT）
+// BAD_PATH    路径非法 / 越界（assertSafePath）
+// GIT_ERROR   git 命令执行失败（gitErr）
+// EMPTY_STAGED 暂存区为空却尝试提交
+// INTERNAL    其余未分类异常
+class ToolError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
+function errResult(code, message) {
+  // isError 与 text 维持旧行为（模型与冒烟测试依赖），structuredContent 是增量
+  return {
+    isError: true,
+    content: [{ type: "text", text: message }],
+    structuredContent: { ok: false, code, message },
+  };
+}
+
+function ok(data) {
+  return { content: [{ type: "text", text: JSON.stringify(data) }] };
+}
+
+// 工具包装：统一解析仓库根 + 把异常映射为结构化错误结果。
+// git_status 传 resolve:false——非仓库是可展示状态而非错误（宿主靠它加载面板）。
+function withTool(fn, { resolve = true } = {}) {
+  return async (args) => {
+    try {
+      return await fn(resolve ? await resolveRepo() : undefined, args);
+    } catch (err) {
+      const code = err instanceof ToolError ? err.code : "INTERNAL";
+      return errResult(code, String(err?.message || err));
+    }
+  };
+}
 
 // ---------------------------------------------------------------------------
 // git plumbing
@@ -19,6 +63,11 @@ const PANEL_URI = `ui://${PLUGIN_NAME}/panel.html`;
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_TIMEOUT = 60_000;
+// 非 ASCII 文件名不转义成带引号的八进制
+const QP = ["-c", "core.quotepath=false"];
+// 未跟踪文件合成 diff 的行数上限；NUL 字节嗅探窗口（区分文本/二进制）
+const MAX_DIFF_LINES = 4000;
+const NUL_SNIFF_BYTES = 8000;
 
 function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
   return new Promise((resolve, reject) => {
@@ -53,7 +102,7 @@ function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      reject(err.code === "ENOENT" ? new Error("未找到 git 可执行文件，请确认已安装 Git 并加入 PATH。") : err);
+      reject(err.code === "ENOENT" ? new ToolError("GIT_MISSING", "未找到 git 可执行文件，请确认已安装 Git 并加入 PATH。") : err);
     });
     child.on("close", (code) => {
       if (settled) return;
@@ -69,28 +118,28 @@ function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
 
 function gitErr(result, fallback) {
   const msg = (result.stderr || result.stdout || "").trim();
-  return new Error(msg || fallback);
+  return new ToolError("GIT_ERROR", msg || fallback);
 }
 
 async function resolveRepo() {
   const cwd = process.cwd();
   const r = await runGit(["rev-parse", "--show-toplevel"], { cwd });
   if (r.code !== 0) {
-    throw new Error(`当前目录不是 Git 仓库：${cwd}\n${r.stderr.trim()}`);
+    throw new ToolError("NOT_A_REPO", `当前目录不是 Git 仓库：${cwd}\n${r.stderr.trim()}`);
   }
   return r.stdout.trim().replace(/\\/g, "/");
 }
 
 // Paths must be repo-relative, inside the repo, and free of traversal.
 function assertSafePath(p) {
-  if (typeof p !== "string" || p.length === 0) throw new Error("路径不能为空");
-  if (p.includes("\0")) throw new Error("路径包含非法字符");
+  if (typeof p !== "string" || p.length === 0) throw new ToolError("BAD_PATH", "路径不能为空");
+  if (p.includes("\0")) throw new ToolError("BAD_PATH", "路径包含非法字符");
   const norm = p.replace(/\\/g, "/");
   if (/^[a-zA-Z]:/.test(norm) || norm.startsWith("/")) {
-    throw new Error(`仅支持仓库内相对路径：${p}`);
+    throw new ToolError("BAD_PATH", `仅支持仓库内相对路径：${p}`);
   }
   const segs = norm.split("/");
-  if (segs.some((s) => s === "..")) throw new Error(`路径不允许包含 ..：${p}`);
+  if (segs.some((s) => s === "..")) throw new ToolError("BAD_PATH", `路径不允许包含 ..：${p}`);
   return norm;
 }
 
@@ -207,10 +256,7 @@ async function getStatus() {
     };
   }
   const top = probe.stdout.trim().replace(/\\/g, "/");
-  const r = await runGit(
-    ["-c", "core.quotepath=false", "status", "--porcelain=v2", "--branch", "--untracked-files=all"],
-    { cwd: top }
-  );
+  const r = await runGit([...QP, "status", "--porcelain=v2", "--branch", "--untracked-files=all"], { cwd: top });
   if (r.code !== 0) throw gitErr(r, "git status 失败");
   const parsed = parseStatus(r.stdout);
   const stashList = await runGit(["stash", "list"], { cwd: top });
@@ -226,13 +272,6 @@ async function getStatus() {
 const MAX_DIFF_BYTES = 512 * 1024;
 const MAX_BLOB_BYTES = 2 * 1024 * 1024;
 
-// 图片扩展名 → MIME，用于面板的图片预览比对
-const IMAGE_MIME = {
-  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-  webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml",
-  avif: "image/avif",
-};
-
 // scope：line=±context 行（默认）；function=整个函数（git -W）；file=整个文件（-U999999）
 function diffContextArgs(context, scope) {
   if (scope === "function") return ["-W"];
@@ -240,26 +279,22 @@ function diffContextArgs(context, scope) {
   return [`-U${context ?? 10}`];
 }
 
+// stdout+stderr 拼成一段人类可读输出（pull/stash 系工具共用）
+function joinOutput(r) {
+  return `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
+}
+
 async function fileDiff(top, entry, staged, context, scope) {
   const { path: p, code, unmerged } = entry;
   const ctxArgs = diffContextArgs(context, scope);
-  if (staged) {
-    const num = await runGit(["-c", "core.quotepath=false", "diff", "--cached", "--numstat", "--", p], { cwd: top });
-    if (/^\s*-\s+-\s/m.test(num.stdout)) return { path: p, staged: true, binary: true, text: "" };
-    const r = await runGit(
-      ["-c", "core.quotepath=false", "diff", "--cached", "--no-color", "-M", ...ctxArgs, "--", p],
-      { cwd: top }
-    );
-    return { path: p, staged: true, binary: false, text: truncate(r.stdout) };
-  }
-  if (code === "?" && !unmerged) {
+  if (!staged && code === "?" && !unmerged) {
     // Untracked: synthesize an all-added diff.
     const abs = path.join(top, ...p.split("/"));
     let content;
     try {
       const st = await stat(abs);
       if (st.size > MAX_DIFF_BYTES) {
-        return { path: p, staged: false, binary: false, truncated: true, text: `--- /dev/null\n+++ b/${p}\n@@ -0,0 1,1 @@\n+（文件超过 512KB，未显示内容）` };
+        return { path: p, staged: false, binary: false, truncated: true, text: `--- /dev/null\n+++ b/${p}\n@@ -0,0 1,1 @@\n+（文件超过 ${MAX_DIFF_BYTES / 1024}KB，未显示内容）` };
       }
       content = await readFile(abs, "utf8");
     } catch {
@@ -267,20 +302,19 @@ async function fileDiff(top, entry, staged, context, scope) {
     }
     // Windows 文件常为 CRLF，去掉 \r，避免面板按 pre 渲染时每行后多出空行
     const lines = content.replace(/\r\n?/g, "\n").split("\n");
-    if (lines.length > 4000) {
-      lines.length = 4000;
-      lines.push("…（内容过长，仅显示前 4000 行）");
+    if (lines.length > MAX_DIFF_LINES) {
+      lines.length = MAX_DIFF_LINES;
+      lines.push(`…（内容过长，仅显示前 ${MAX_DIFF_LINES} 行）`);
     }
-    const header = `--- /dev/null\n+++ b/${p}\n@@ -0,0 1,${lines.length} @@\n`;
+    const header = `--- /dev/null\n+++ b/${p}\n@@ -0,0 +1,${lines.length} @@\n`;
     return { path: p, staged: false, binary: false, text: truncate(header + lines.map((l) => `+${l}`).join("\n")) };
   }
-  const num = await runGit(["-c", "core.quotepath=false", "diff", "--numstat", "--", p], { cwd: top });
-  if (/^\s*-\s+-\s/m.test(num.stdout)) return { path: p, staged: false, binary: true, text: "" };
-  const r = await runGit(
-    ["-c", "core.quotepath=false", "diff", "--no-color", "-M", ...ctxArgs, "--", p],
-    { cwd: top }
-  );
-  return { path: p, staged: false, binary: false, text: truncate(r.stdout) };
+  // staged 对比 HEAD 与暂存区，否则对比暂存区与工作区；两分支仅差 --cached
+  const range = staged ? ["diff", "--cached"] : ["diff"];
+  const num = await runGit([...QP, ...range, "--numstat", "--", p], { cwd: top });
+  if (/^\s*-\s+-\s/m.test(num.stdout)) return { path: p, staged, binary: true, text: "" };
+  const r = await runGit([...QP, ...range, "--no-color", "-M", ...ctxArgs, "--", p], { cwd: top });
+  return { path: p, staged, binary: false, text: truncate(r.stdout) };
 }
 
 function truncate(text) {
@@ -306,7 +340,7 @@ server.registerTool(
     inputSchema: {},
     ...uiMeta,
   },
-  async () => ok(await getStatus())
+  withTool(async () => ok(await getStatus()), { resolve: false })
 );
 
 server.registerTool(
@@ -323,8 +357,7 @@ server.registerTool(
     },
     ...uiMeta,
   },
-  async ({ path: p, staged = false, context, scope = "line" }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { path: p, staged = false, context, scope = "line" }) => {
     const safe = assertSafePath(p);
     const st = await getStatus();
     const all = [...st.staged, ...st.unstaged];
@@ -333,7 +366,7 @@ server.registerTool(
       return ok({ path: safe, staged, binary: false, text: `（${staged ? "暂存区" : "工作区"}中没有该文件的变更）` });
     }
     return ok(await fileDiff(top, entry, staged, context, scope));
-  }
+  })
 );
 
 server.registerTool(
@@ -344,13 +377,12 @@ server.registerTool(
     inputSchema: pathsSchema,
     ...uiMeta,
   },
-  async ({ paths }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { paths }) => {
     const safe = paths.map(assertSafePath);
     const r = await runGit(["add", "--", ...safe], { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git add 失败");
     return ok({ staged: safe, status: await getStatus() });
-  }
+  })
 );
 
 server.registerTool(
@@ -361,8 +393,7 @@ server.registerTool(
     inputSchema: pathsSchema,
     ...uiMeta,
   },
-  async ({ paths }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { paths }) => {
     const safe = paths.map(assertSafePath);
     const head = await runGit(["rev-parse", "--verify", "-q", "HEAD"], { cwd: top });
     const r =
@@ -371,7 +402,7 @@ server.registerTool(
         : await runGit(["rm", "--cached", "-r", "-q", "--", ...safe], { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git restore --staged 失败");
     return ok({ unstaged: safe, status: await getStatus() });
-  }
+  })
 );
 
 server.registerTool(
@@ -383,8 +414,7 @@ server.registerTool(
     inputSchema: pathsSchema,
     ...uiMeta,
   },
-  async ({ paths }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { paths }) => {
     const safe = paths.map(assertSafePath);
     const st = await getStatus();
     const untracked = new Set(st.unstaged.filter((e) => e.code === "?").map((e) => e.path));
@@ -406,7 +436,7 @@ server.registerTool(
       }
     }
     return ok({ discarded: safe, deletedUntracked: deleted, status: await getStatus() });
-  }
+  })
 );
 
 server.registerTool(
@@ -419,18 +449,17 @@ server.registerTool(
     },
     ...uiMeta,
   },
-  async ({ message }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { message }) => {
     const st = await getStatus();
     if (st.staged.length === 0 && st.conflicts.length === 0) {
-      throw new Error("暂存区为空：请先添加要提交的文件（git_stage）。");
+      throw new ToolError("EMPTY_STAGED", "暂存区为空：请先添加要提交的文件（git_stage）。");
     }
     const r = await runGit(["-c", "i18n.commitEncoding=UTF-8", "commit", "--file=-"], { cwd: top, stdin: message });
     if (r.code !== 0) throw gitErr(r, "git commit 失败");
     const after = await getStatus();
     const m = r.stdout.match(/\[.*?\s([0-9a-f]{7,})\]/);
     return ok({ commit: m ? m[1] : undefined, output: r.stdout.trim(), status: after });
-  }
+  })
 );
 
 server.registerTool(
@@ -443,10 +472,9 @@ server.registerTool(
     },
     ...uiMeta,
   },
-  async ({ limit = 20 }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { limit = 20 }) => {
     const r = await runGit(
-      ["-c", "core.quotepath=false", "log", `--pretty=format:%h%x09%an%x09%ad%x09%s`, "--date=short", `-n${limit}`],
+      [...QP, "log", `--pretty=format:%h%x09%an%x09%ad%x09%s`, "--date=short", `-n${limit}`],
       { cwd: top }
     );
     if (r.code !== 0) throw gitErr(r, "git log 失败");
@@ -458,7 +486,7 @@ server.registerTool(
         return { hash, author, date, subject: rest.join("\t") };
       });
     return ok({ commits });
-  }
+  })
 );
 
 server.registerTool(
@@ -469,13 +497,11 @@ server.registerTool(
     inputSchema: {},
     ...uiMeta,
   },
-  async () => {
-    const top = await resolveRepo();
+  withTool(async (top) => {
     const r = await runGit(["pull", "--no-edit"], { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git pull 失败");
-    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
-    return ok({ output, status: await getStatus() });
-  }
+    return ok({ output: joinOutput(r), status: await getStatus() });
+  })
 );
 
 server.registerTool(
@@ -487,14 +513,12 @@ server.registerTool(
     inputSchema: {},
     ...uiMeta,
   },
-  async () => {
-    const top = await resolveRepo();
+  withTool(async (top) => {
     // -u：连未跟踪文件一起入栈，否则新文件存储后还原不回来。
     const r = await runGit(["stash", "push", "-u"], { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git stash 失败");
-    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
-    return ok({ output, status: await getStatus() });
-  }
+    return ok({ output: joinOutput(r), status: await getStatus() });
+  })
 );
 
 server.registerTool(
@@ -505,13 +529,11 @@ server.registerTool(
     inputSchema: {},
     ...uiMeta,
   },
-  async () => {
-    const top = await resolveRepo();
+  withTool(async (top) => {
     const r = await runGit(["stash", "pop"], { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git stash pop 失败");
-    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
-    return ok({ output, status: await getStatus() });
-  }
+    return ok({ output: joinOutput(r), status: await getStatus() });
+  })
 );
 
 server.registerTool(
@@ -524,13 +546,11 @@ server.registerTool(
     },
     ...uiMeta,
   },
-  async ({ ref }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { ref }) => {
     const r = await runGit(["stash", "apply", ref], { cwd: top });
     if (r.code !== 0) throw gitErr(r, `git stash apply ${ref} 失败`);
-    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
-    return ok({ output, status: await getStatus() });
-  }
+    return ok({ output: joinOutput(r), status: await getStatus() });
+  })
 );
 
 server.registerTool(
@@ -541,9 +561,8 @@ server.registerTool(
     inputSchema: {},
     ...uiMeta,
   },
-  async () => {
-    const top = await resolveRepo();
-    const r = await runGit(["-c", "core.quotepath=false", "stash", "list", "--format=%gd%x09%gs"], { cwd: top });
+  withTool(async (top) => {
+    const r = await runGit([...QP, "stash", "list", "--format=%gd%x09%gs"], { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git stash list 失败");
     const entries = r.stdout
       .split("\n")
@@ -553,7 +572,7 @@ server.registerTool(
         return { ref: l.slice(0, tab), message: tab < 0 ? "" : l.slice(tab + 1) };
       });
     return ok({ entries });
-  }
+  })
 );
 
 server.registerTool(
@@ -568,8 +587,7 @@ server.registerTool(
     },
     ...uiMeta,
   },
-  async ({ path: p, rev }) => {
-    const top = await resolveRepo();
+  withTool(async (top, { path: p, rev }) => {
     const safe = assertSafePath(p);
     const ext = (safe.split("/").pop().split(".").pop() || "").toLowerCase();
     let buf;
@@ -577,7 +595,7 @@ server.registerTool(
       try {
         buf = await readFile(path.join(top, ...safe.split("/")));
       } catch {
-        throw new Error(`无法读取工作区文件：${safe}`);
+        throw new ToolError("GIT_ERROR", `无法读取工作区文件：${safe}`);
       }
     } else {
       // index 用 :path，HEAD 用 HEAD:path（重命名场景由调用方传入对应路径）
@@ -593,16 +611,12 @@ server.registerTool(
       return ok({ path: safe, rev, mime, base64: buf.toString("base64"), size: buf.byteLength });
     }
     // 非图片：简单嗅探 NUL 字节区分文本与二进制
-    if (buf.subarray(0, 8000).includes(0)) {
+    if (buf.subarray(0, NUL_SNIFF_BYTES).includes(0)) {
       return ok({ path: safe, rev, binary: true, size: buf.byteLength });
     }
     return ok({ path: safe, rev, mime: "text/plain", text: truncate(buf.toString("utf8")), size: buf.byteLength });
-  }
+  })
 );
-
-function ok(data) {
-  return { content: [{ type: "text", text: JSON.stringify(data) }] };
-}
 
 // ---------------------------------------------------------------------------
 // panel resource
