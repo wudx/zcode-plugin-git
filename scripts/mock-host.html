@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>Mock ZCode Host — Git Panel Harness</title>
+<style>
+  body { margin: 0; background: #161616; color: #ddd; font: 13px system-ui; display: flex; height: 100vh; }
+  #side { width: 220px; padding: 12px; box-sizing: border-box; border-right: 1px solid #333; flex: none; }
+  #side h1 { font-size: 13px; margin: 0 0 10px; color: #9fd; }
+  #side button { display: block; width: 100%; margin: 6px 0; padding: 6px; background: #26262b; color: #ddd; border: 1px solid #444; border-radius: 6px; cursor: pointer; font: 12px system-ui; text-align: left; }
+  #side button:hover { border-color: #888; }
+  #log { height: 45%; overflow: auto; font: 10px/1.4 monospace; color: #888; margin-top: 12px; border-top: 1px solid #333; padding-top: 8px; }
+  #framebox { flex: 1; display: flex; }
+  iframe { flex: 1; border: 0; background: #17171a; }
+</style>
+</head>
+<body>
+<div id="side">
+  <h1>Mock Host</h1>
+  <button id="b-reload">↻ 重载面板</button>
+  <button id="b-theme">◐ 切换主题</button>
+  <button id="b-clean">✓ 空仓库场景</button>
+  <button id="b-rich">🌿 富场景（默认）</button>
+  <button id="b-norepo">✗ 非仓库错误</button>
+  <button id="b-nosample">⊘ 关闭 sampling 能力</button>
+  <div id="log"></div>
+</div>
+<div id="framebox"><iframe id="frame" src="/panel.html"></iframe></div>
+<script>
+"use strict";
+const frame = document.getElementById("frame");
+const logEl = document.getElementById("log");
+function log(...args) {
+  const line = document.createElement("div");
+  line.textContent = args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" ").slice(0, 300);
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+let dark = true;
+let samplingOn = true;
+let scenario = "rich";
+let state = null;
+
+const DIFFS = {
+  "src/git/client.ts:staged": `diff --git a/src/git/client.ts b/src/git/client.ts
+new file mode 100644
+index 0000000..a3f9c21
+--- /dev/null
++++ b/src/git/client.ts
+@@ -0,0 1,34 @@
++import { spawn } from "node:child_process";
++
++export interface StatusEntry {
++  code: string;
++  path: string;
++  origPath?: string;
++}
++
++export interface RepoStatus {
++  branch: string;
++  staged: StatusEntry[];
++  unstaged: StatusEntry[];
++}
++
++export function runGit(args: string[], cwd: string) {
++  const child = spawn("git", args, { cwd });
++  return new Promise((resolve, reject) => {
++    let out = "";
++    child.stdout.on("data", (d) => (out += d));
++    child.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error("git failed"))));
++  });
++}`,
+  "README.md:staged": `diff --git a/README.md b/README.md
+index 9c8f2a1..b7d3e44 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,9 @@
+ # demo-project
+ 
+-一个演示项目。
++A demo project with a git workbench panel.
++
++## Usage
++
++- 打开侧栏 Git 面板查看变更`,
+  "src/git.ts:staged": `diff --git a/src/git-legacy.ts b/src/git.ts
+similarity index 92%
+rename from src/git-legacy.ts
+rename to src/git.ts
+index e69de29..d95f2ca 100644
+--- a/src/git-legacy.ts
++++ b/src/git.ts
+@@ -2,7 +2,7 @@
+-export const VERSION = "0.9.0";
++export const VERSION = "1.0.0";`,
+  "src/server.ts:work": `diff --git a/src/server.ts b/src/server.ts
+index 1a2b3c4..5d6e7f8 100644
+--- a/src/server.ts
++++ b/src/server.ts
+@@ -10,9 +10,14 @@ export function main() {
+   const port = 3000;
+-  app.listen(port);
++  const host = process.env.HOST ?? "127.0.0.1";
++  app.listen(port, host);
+   console.log("listening", port);
+ }
+ 
+-function helper() {
+-  return null;
++function helper(input?: string): string | null {
++  if (!input) return null;
++  return input.trim();
+ }`,
+  "docs/old.md:work": `diff --git a/docs/old.md b/docs/old.md
+deleted file mode 100644
+index 33e4d55..0000000
+--- a/docs/old.md
++++ /dev/null
+@@ -1,3 +0,0 @@
+-# 旧文档
+-
+-已废弃。`,
+  "draft notes.txt:work": `--- /dev/null
++++ b/draft notes.txt
+@@ -0,0 1,4 @@
++待办：
++- 整理 diff 视图
++- AI 提交信息按钮
++- 冲突文件处理`,
+};
+
+const SCENARIOS = {
+  rich: {
+    repo: "E:/demo-project",
+    branch: "feat/git-panel",
+    upstream: "origin/feat/git-panel",
+    ahead: 2,
+    behind: 1,
+    detached: false,
+    conflicts: [],
+    staged: [
+      { code: "A", label: "added", path: "src/git/client.ts" },
+      { code: "M", label: "modified", path: "README.md" },
+      { code: "R", label: "renamed", path: "src/git.ts", origPath: "src/git-legacy.ts" },
+    ],
+    unstaged: [
+      { code: "M", label: "modified", path: "src/server.ts" },
+      { code: "D", label: "deleted", path: "docs/old.md" },
+      { code: "?", label: "untracked", path: "draft notes.txt" },
+    ],
+  },
+  clean: {
+    repo: "E:/demo-project",
+    branch: "main",
+    upstream: "",
+    ahead: 0,
+    behind: 0,
+    detached: false,
+    conflicts: [],
+    staged: [],
+    unstaged: [],
+  },
+  norepo: {
+    isError: true,
+    error: "当前目录不是 Git 仓库：E:/somewhere\nfatal: not a git repository (or any of the parent directories): .git",
+  },
+};
+
+function toolResult(name, args) {
+  log("tool:", name, args);
+  if (scenario === "norepo" && name === "git_status") {
+    const s = SCENARIOS.norepo;
+    return { isError: true, content: [{ type: "text", text: JSON.stringify(s) }] };
+  }
+  if (name === "git_status") {
+    return { content: [{ type: "text", text: JSON.stringify(state) }] };
+  }
+  switch (name) {
+    case "git_diff": {
+      const key = `${args.path}:${args.staged ? "staged" : "work"}`;
+      const text = DIFFS[key] ?? "(no changes)";
+      const binary = args.path.endsWith(".png");
+      return { content: [{ type: "text", text: JSON.stringify({ path: args.path, staged: !!args.staged, binary, text }) }] };
+    }
+    case "git_stage": {
+      const moved = args.paths ?? [];
+      state = JSON.parse(JSON.stringify(state));
+      state.unstaged = state.unstaged.filter((e) => !moved.includes(e.path));
+      for (const p of moved) {
+        if (!state.staged.some((e) => e.path === p)) state.staged.push({ code: "A", label: "added", path: p });
+      }
+      return { content: [{ type: "text", text: JSON.stringify(state) }] };
+    }
+    case "git_unstage": {
+      const moved = args.paths ?? [];
+      state = JSON.parse(JSON.stringify(state));
+      state.staged = state.staged.filter((e) => !moved.includes(e.path) && !moved.includes(e.origPath));
+      for (const p of moved) state.unstaged.push({ code: "M", label: "modified", path: p });
+      return { content: [{ type: "text", text: JSON.stringify(state) }] };
+    }
+    case "git_discard": {
+      const moved = args.paths ?? [];
+      state = JSON.parse(JSON.stringify(state));
+      const removed = state.unstaged.filter((e) => moved.includes(e.path));
+      state.unstaged = state.unstaged.filter((e) => !moved.includes(e.path));
+      return { content: [{ type: "text", text: JSON.stringify({ discarded: moved, deletedUntracked: removed.map((e) => e.code === "?" ? e.path : "").filter(Boolean), status: state }) }] };
+    }
+    case "git_commit": {
+      const msg = String(args.message || "").split("\n")[0];
+      state = { repo: state.repo, branch: state.branch, upstream: state.upstream, ahead: state.ahead + 1, behind: state.behind, detached: false, conflicts: [], staged: [], unstaged: [] };
+      return { content: [{ type: "text", text: JSON.stringify({ commit: "9f01c3a", output: "[feat/git-panel 9f01c3a] " + msg, status: state }) }] };
+    }
+    case "git_log":
+      return { content: [{ type: "text", text: JSON.stringify({ commits: [
+        { hash: "9f01c3a", author: "wudx", date: "2026-11-04", subject: "feat(git): add workbench panel" },
+        { hash: "2b77e10", author: "wudx", date: "2026-11-03", subject: "chore: bump deps" },
+      ] }) }] };
+    default:
+      return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: "unknown tool " + name }) }] };
+  }
+}
+
+frame.addEventListener("load", () => log("panel loaded"));
+state = JSON.parse(JSON.stringify(SCENARIOS.rich));
+
+window.addEventListener("message", (ev) => {
+  const msg = ev.data;
+  if (!msg || msg.jsonrpc !== "2.0") return;
+  if (msg.method === "ui/initialize") {
+    log("ui/initialize", msg.params?.appInfo);
+    frame.contentWindow.postMessage({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        protocolVersion: msg.params?.protocolVersion ?? "2025-06-18",
+        hostInfo: { name: "zcode-mock", version: "0.0.0" },
+        hostCapabilities: { sampling: samplingOn ? { tools: {} } : undefined, tools: { listChanged: true } },
+        hostContext: {
+          theme: dark ? "dark" : "light",
+          locale: "zh-CN",
+          displayMode: "inline",
+          platform: "desktop",
+          styles: { variables: {
+            "--color-background-primary": dark ? "#17171a" : "#ffffff",
+            "--color-background-secondary": dark ? "#1f1f23" : "#f4f4f5",
+            "--color-text-primary": dark ? "#e4e4e7" : "#18181b",
+            "--color-text-secondary": dark ? "#9d9da7" : "#52525b",
+            "--color-border-secondary": dark ? "#2c2c33" : "#d4d4d8",
+            "--color-ring-primary": "#4f8ef7",
+          } },
+        },
+      },
+    }, "*");
+    return;
+  }
+  if (msg.method === "ui/notifications/initialized") {
+    log("panel initialized ✓");
+    return;
+  }
+  if (msg.method === "tools/call") {
+    frame.contentWindow.postMessage({ jsonrpc: "2.0", id: msg.id, result: toolResult(msg.params?.name, msg.params?.arguments) }, "*");
+    return;
+  }
+  if (msg.method === "sampling/createMessage") {
+    log("sampling:", String(msg.params?.messages?.[0]?.content?.text ?? "").slice(0, 60), "...");
+    frame.contentWindow.postMessage({
+      jsonrpc: "2.0",
+      id: msg.id,
+      result: {
+        role: "assistant",
+        model: "mock-model",
+        stopReason: "endTurn",
+        content: { type: "text", text: "feat(git): 新增 Git 工作台侧栏面板\n\n- 暂存区/工作区文件列表与彩色 diff\n- 暂存、取消暂存、撤销操作\n- AI 生成提交信息并一键提交" },
+      },
+    }, "*");
+    return;
+  }
+  if (msg.id !== undefined && msg.method) {
+    frame.contentWindow.postMessage({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found: " + msg.method } }, "*");
+  }
+});
+
+document.getElementById("b-reload").addEventListener("click", () => { state = JSON.parse(JSON.stringify(SCENARIOS.rich)); frame.src = "/panel.html?" + Date.now(); });
+document.getElementById("b-theme").addEventListener("click", () => (dark = !dark));
+document.getElementById("b-clean").addEventListener("click", () => { scenario = "clean"; state = JSON.parse(JSON.stringify(SCENARIOS.clean)); });
+document.getElementById("b-rich").addEventListener("click", () => { scenario = "rich"; state = JSON.parse(JSON.stringify(SCENARIOS.rich)); });
+document.getElementById("b-norepo").addEventListener("click", () => { scenario = "norepo"; });
+document.getElementById("b-nosample").addEventListener("click", () => (samplingOn = false));
+</script>
+</body>
+</html>

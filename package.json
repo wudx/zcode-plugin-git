@@ -1,0 +1,16 @@
+{
+  "name": "zcode-plugin-git-workspace",
+  "private": true,
+  "type": "module",
+  "description": "Build tooling for the zcode git plugin",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/ext-apps": "^2.0.4",
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "esbuild": "^0.25.0",
+    "zod": "^4.2.0"
+  }
+}

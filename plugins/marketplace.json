@@ -1,0 +1,18 @@
+{
+  "name": "dev-zcode-plugin-git-e73aa4b8",
+  "plugins": [
+    {
+      "name": "git",
+      "source": "./git",
+      "version": "0.1.0",
+      "description": "Git workbench side panel: review staged and working-tree changes, stage/unstage/discard files, commit, and generate AI commit messages.",
+      "displayName": "Git 工具",
+      "displayName_i18n": {
+        "zh-CN": "Git 工具"
+      },
+      "description_i18n": {
+        "zh-CN": "Git 工作台侧栏面板：查看暂存与工作区修改，暂存/取消暂存/撤销，AI 生成提交信息并提交"
+      }
+    }
+  ]
+}

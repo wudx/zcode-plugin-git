@@ -1,0 +1,40 @@
+{
+  "name": "git",
+  "version": "0.1.0",
+  "description": "Git workbench side panel: review staged and working-tree changes, stage/unstage/discard files, commit, and generate AI commit messages.",
+  "description_i18n": {
+    "en": "Git workbench side panel: review staged and working-tree changes with colored diffs, stage/unstage/discard files, write and run commits, and generate AI commit messages from the staged diff.",
+    "zh-CN": "Git 工作台侧栏面板：查看暂存区与工作区修改（彩色 diff），支持添加到暂存、取消暂存（还原到工作区）、撤销工作区修改，一键提交，并可基于暂存内容用 AI 生成提交信息。"
+  },
+  "author": {
+    "name": "dsp"
+  },
+  "mcpServers": {
+    "git": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/server.mjs"],
+      "cwd": "${ZCODE_PROJECT_DIR}",
+      "env": {
+        "ZCODE_WORKSPACE_ROOT": "${ZCODE_PROJECT_DIR}"
+      },
+      "isolation": "workspace"
+    }
+  },
+  "ui": {
+    "surfaces": [
+      {
+        "id": "git",
+        "title": {
+          "zh-CN": "Git",
+          "en-US": "Git"
+        },
+        "icon": "git-branch",
+        "server": "git",
+        "resourceUri": "ui://git/panel.html",
+        "availability": "session"
+      }
+    ]
+  },
+  "commands": "commands"
+}
