@@ -1,5 +1,5 @@
 // Git workbench MCP server for ZCode.
-// Tools: status / diff / stage / unstage / discard / commit / log.
+// Tools: status / diff / stage / unstage / discard / commit / log / pull / stash.
 // Also serves the panel UI as an MCP Apps resource (ui://git/panel.html).
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -10,7 +10,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PLUGIN_NAME = "git";
-const VERSION = "0.1.0";
+const VERSION = "0.3.3";
 const PANEL_URI = `ui://${PLUGIN_NAME}/panel.html`;
 
 // ---------------------------------------------------------------------------
@@ -28,7 +28,9 @@ function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
       env: { ...process.env, LC_ALL: "C", GIT_OPTIONAL_LOCKS: "0" },
       stdio: ["pipe", "pipe", "pipe"],
     });
-    let stdout = "";
+    // stdout 以 Buffer 收集，保证 git show 等二进制输出不被 utf8 解码破坏
+    const chunks = [];
+    let outLen = 0;
     let stderr = "";
     let settled = false;
     const timer = setTimeout(() => {
@@ -39,7 +41,10 @@ function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
       }
     }, timeout);
     child.stdout.on("data", (d) => {
-      if (stdout.length < MAX_BUFFER) stdout += d.toString("utf8");
+      if (outLen < MAX_BUFFER) {
+        chunks.push(d);
+        outLen += d.length;
+      }
     });
     child.stderr.on("data", (d) => {
       if (stderr.length < 1024 * 1024) stderr += d.toString("utf8");
@@ -54,7 +59,8 @@ function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ code, stdout, stderr });
+      const stdoutBuf = Buffer.concat(chunks);
+      resolve({ code, stdoutBuf, stdout: stdoutBuf.toString("utf8"), stderr });
     });
     if (stdin != null) child.stdin.end(stdin, "utf8");
     else child.stdin.end();
@@ -178,14 +184,39 @@ function parseStatus(out) {
 }
 
 async function getStatus() {
-  const top = await resolveRepo();
+  const cwd = process.cwd();
+  const probe = await runGit(["rev-parse", "--show-toplevel"], { cwd });
+  if (probe.code !== 0) {
+    // Not a repo is a displayable state, not a tool error: the host opens the
+    // sidebar UI by calling git_status and refuses to load the panel on isError.
+    return {
+      ok: false,
+      reason: "not_a_git_repo",
+      repo: null,
+      cwd,
+      branch: "",
+      upstream: "",
+      ahead: 0,
+      behind: 0,
+      detached: false,
+      staged: [],
+      unstaged: [],
+      conflicts: [],
+      stashes: 0,
+      error: `当前目录不是 Git 仓库：${cwd}\n${probe.stderr.trim()}`,
+    };
+  }
+  const top = probe.stdout.trim().replace(/\\/g, "/");
   const r = await runGit(
     ["-c", "core.quotepath=false", "status", "--porcelain=v2", "--branch", "--untracked-files=all"],
     { cwd: top }
   );
   if (r.code !== 0) throw gitErr(r, "git status 失败");
   const parsed = parseStatus(r.stdout);
-  return { repo: top, ...parsed };
+  const stashList = await runGit(["stash", "list"], { cwd: top });
+  const stashes =
+    stashList.code === 0 ? stashList.stdout.split("\n").filter((l) => l.trim() !== "").length : 0;
+  return { ok: true, repo: top, stashes, ...parsed };
 }
 
 // ---------------------------------------------------------------------------
@@ -193,15 +224,30 @@ async function getStatus() {
 // ---------------------------------------------------------------------------
 
 const MAX_DIFF_BYTES = 512 * 1024;
+const MAX_BLOB_BYTES = 2 * 1024 * 1024;
 
-async function fileDiff(top, entry, staged, context) {
+// 图片扩展名 → MIME，用于面板的图片预览比对
+const IMAGE_MIME = {
+  png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
+  webp: "image/webp", bmp: "image/bmp", ico: "image/x-icon", svg: "image/svg+xml",
+  avif: "image/avif",
+};
+
+// scope：line=±context 行（默认）；function=整个函数（git -W）；file=整个文件（-U999999）
+function diffContextArgs(context, scope) {
+  if (scope === "function") return ["-W"];
+  if (scope === "file") return ["-U999999"];
+  return [`-U${context ?? 10}`];
+}
+
+async function fileDiff(top, entry, staged, context, scope) {
   const { path: p, code, unmerged } = entry;
-  const ctx = context ?? 3;
+  const ctxArgs = diffContextArgs(context, scope);
   if (staged) {
     const num = await runGit(["-c", "core.quotepath=false", "diff", "--cached", "--numstat", "--", p], { cwd: top });
     if (/^\s*-\s+-\s/m.test(num.stdout)) return { path: p, staged: true, binary: true, text: "" };
     const r = await runGit(
-      ["-c", "core.quotepath=false", "diff", "--cached", "--no-color", "-M", `-U${ctx}`, "--", p],
+      ["-c", "core.quotepath=false", "diff", "--cached", "--no-color", "-M", ...ctxArgs, "--", p],
       { cwd: top }
     );
     return { path: p, staged: true, binary: false, text: truncate(r.stdout) };
@@ -219,7 +265,8 @@ async function fileDiff(top, entry, staged, context) {
     } catch {
       return { path: p, staged: false, binary: false, text: `（无法读取文件：${p}）` };
     }
-    const lines = content.split("\n");
+    // Windows 文件常为 CRLF，去掉 \r，避免面板按 pre 渲染时每行后多出空行
+    const lines = content.replace(/\r\n?/g, "\n").split("\n");
     if (lines.length > 4000) {
       lines.length = 4000;
       lines.push("…（内容过长，仅显示前 4000 行）");
@@ -230,7 +277,7 @@ async function fileDiff(top, entry, staged, context) {
   const num = await runGit(["-c", "core.quotepath=false", "diff", "--numstat", "--", p], { cwd: top });
   if (/^\s*-\s+-\s/m.test(num.stdout)) return { path: p, staged: false, binary: true, text: "" };
   const r = await runGit(
-    ["-c", "core.quotepath=false", "diff", "--no-color", "-M", `-U${ctx}`, "--", p],
+    ["-c", "core.quotepath=false", "diff", "--no-color", "-M", ...ctxArgs, "--", p],
     { cwd: top }
   );
   return { path: p, staged: false, binary: false, text: truncate(r.stdout) };
@@ -255,7 +302,7 @@ server.registerTool(
   {
     title: "查看 Git 状态",
     description:
-      "查看当前仓库状态：分支、ahead/behind、已暂存的文件列表、工作区修改（含未跟踪）列表与冲突文件。返回 JSON。工作区修改指未暂存的更改；未跟踪文件 code 为 '?'。",
+      "查看当前仓库状态：分支、ahead/behind、已暂存的文件列表、工作区修改（含未跟踪）列表与冲突文件。返回 JSON。工作区修改指未暂存的更改；未跟踪文件 code 为 '?'。当前目录不是 Git 仓库时返回 ok:false（reason=not_a_git_repo），这是正常状态不是错误。",
     inputSchema: {},
     ...uiMeta,
   },
@@ -267,15 +314,16 @@ server.registerTool(
   {
     title: "查看文件 diff",
     description:
-      "查看单个文件的统一 diff。staged=true 时对比 HEAD 与暂存区，否则对比暂存区与工作区（未跟踪文件显示为全新增）。二进制文件返回 binary=true。",
+      "查看单个文件的统一 diff。staged=true 时对比 HEAD 与暂存区，否则对比暂存区与工作区（未跟踪文件显示为全新增）。scope：line=按 context 行数显示上下文（默认 10 行），function=显示改动所在的整个函数（便于定位逻辑），file=显示整个文件。二进制文件返回 binary=true。",
     inputSchema: {
       path: z.string().min(1).describe("仓库内相对路径"),
       staged: z.boolean().optional().describe("是否查看已暂存的 diff，默认 false"),
-      context: z.number().int().min(0).max(50).optional().describe("上下文行数，默认 3"),
+      context: z.number().int().min(0).max(50).optional().describe("上下文行数，默认 10（scope=line 时生效）"),
+      scope: z.enum(["line", "function", "file"]).optional().describe("diff 上下文范围，默认 line"),
     },
     ...uiMeta,
   },
-  async ({ path: p, staged = false, context }) => {
+  async ({ path: p, staged = false, context, scope = "line" }) => {
     const top = await resolveRepo();
     const safe = assertSafePath(p);
     const st = await getStatus();
@@ -284,7 +332,7 @@ server.registerTool(
     if (!entry) {
       return ok({ path: safe, staged, binary: false, text: `（${staged ? "暂存区" : "工作区"}中没有该文件的变更）` });
     }
-    return ok(await fileDiff(top, entry, staged, context));
+    return ok(await fileDiff(top, entry, staged, context, scope));
   }
 );
 
@@ -410,6 +458,145 @@ server.registerTool(
         return { hash, author, date, subject: rest.join("\t") };
       });
     return ok({ commits });
+  }
+);
+
+server.registerTool(
+  "git_pull",
+  {
+    title: "拉取远程更新",
+    description: "在当前分支执行 git pull（--no-edit），拉取并合并上游更新。没有配置上游分支或产生冲突时会报错，报错信息为 git 原始输出。",
+    inputSchema: {},
+    ...uiMeta,
+  },
+  async () => {
+    const top = await resolveRepo();
+    const r = await runGit(["pull", "--no-edit"], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, "git pull 失败");
+    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
+    return ok({ output, status: await getStatus() });
+  }
+);
+
+server.registerTool(
+  "git_stash",
+  {
+    title: "存储全部改动",
+    description:
+      "把暂存区与工作区的全部改动存入 stash（git stash push -u，包含未跟踪文件，.gitignore 忽略的文件除外）。没有可存储的改动时报错。",
+    inputSchema: {},
+    ...uiMeta,
+  },
+  async () => {
+    const top = await resolveRepo();
+    // -u：连未跟踪文件一起入栈，否则新文件存储后还原不回来。
+    const r = await runGit(["stash", "push", "-u"], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, "git stash 失败");
+    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
+    return ok({ output, status: await getStatus() });
+  }
+);
+
+server.registerTool(
+  "git_stash_pop",
+  {
+    title: "恢复最近一次存储",
+    description: "恢复最近一次 stash 并删除该条目（git stash pop）。有冲突时报错展示，此时条目保留。",
+    inputSchema: {},
+    ...uiMeta,
+  },
+  async () => {
+    const top = await resolveRepo();
+    const r = await runGit(["stash", "pop"], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, "git stash pop 失败");
+    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
+    return ok({ output, status: await getStatus() });
+  }
+);
+
+server.registerTool(
+  "git_stash_apply",
+  {
+    title: "应用指定存储",
+    description: "应用指定的 stash 条目但保留它（git stash apply）。ref 形如 stash@{0}，可先用 git_stash_list 查看。",
+    inputSchema: {
+      ref: z.string().regex(/^stash@\{\d+\}$/).describe("存储引用，如 stash@{0}"),
+    },
+    ...uiMeta,
+  },
+  async ({ ref }) => {
+    const top = await resolveRepo();
+    const r = await runGit(["stash", "apply", ref], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, `git stash apply ${ref} 失败`);
+    const output = `${r.stdout.trim()}${r.stderr.trim() ? "\n" + r.stderr.trim() : ""}`.trim();
+    return ok({ output, status: await getStatus() });
+  }
+);
+
+server.registerTool(
+  "git_stash_list",
+  {
+    title: "查看存储列表",
+    description: "查看 stash 列表，返回 entries 数组（ref 如 stash@{0}，message 为存储说明，通常是当时的分支与提交）。",
+    inputSchema: {},
+    ...uiMeta,
+  },
+  async () => {
+    const top = await resolveRepo();
+    const r = await runGit(["-c", "core.quotepath=false", "stash", "list", "--format=%gd%x09%gs"], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, "git stash list 失败");
+    const entries = r.stdout
+      .split("\n")
+      .filter((l) => l.trim() !== "")
+      .map((l) => {
+        const tab = l.indexOf("\t");
+        return { ref: l.slice(0, tab), message: tab < 0 ? "" : l.slice(tab + 1) };
+      });
+    return ok({ entries });
+  }
+);
+
+server.registerTool(
+  "git_blob",
+  {
+    title: "读取文件版本内容",
+    description:
+      "读取文件在指定版本的内容，供图片等二进制文件预览比对。rev：worktree=磁盘工作区，index=暂存区，HEAD=最近提交。图片返回 { mime, base64 }；超过 2MB 返回 tooLarge:true；非图片二进制返回 binary:true；文本返回 { text }。",
+    inputSchema: {
+      path: z.string().min(1).describe("仓库内相对路径"),
+      rev: z.enum(["worktree", "index", "HEAD"]).describe("要读取的版本"),
+    },
+    ...uiMeta,
+  },
+  async ({ path: p, rev }) => {
+    const top = await resolveRepo();
+    const safe = assertSafePath(p);
+    const ext = (safe.split("/").pop().split(".").pop() || "").toLowerCase();
+    let buf;
+    if (rev === "worktree") {
+      try {
+        buf = await readFile(path.join(top, ...safe.split("/")));
+      } catch {
+        throw new Error(`无法读取工作区文件：${safe}`);
+      }
+    } else {
+      // index 用 :path，HEAD 用 HEAD:path（重命名场景由调用方传入对应路径）
+      const r = await runGit(["show", `${rev === "HEAD" ? "HEAD:" : ":"}${safe}`], { cwd: top });
+      if (r.code !== 0) throw gitErr(r, `无法读取 ${rev} 版本：${safe}`);
+      buf = r.stdoutBuf;
+    }
+    if (buf.byteLength > MAX_BLOB_BYTES) {
+      return ok({ path: safe, rev, tooLarge: true, size: buf.byteLength });
+    }
+    const mime = IMAGE_MIME[ext];
+    if (mime) {
+      return ok({ path: safe, rev, mime, base64: buf.toString("base64"), size: buf.byteLength });
+    }
+    // 非图片：简单嗅探 NUL 字节区分文本与二进制
+    if (buf.subarray(0, 8000).includes(0)) {
+      return ok({ path: safe, rev, binary: true, size: buf.byteLength });
+    }
+    return ok({ path: safe, rev, mime: "text/plain", text: truncate(buf.toString("utf8")), size: buf.byteLength });
   }
 );
 

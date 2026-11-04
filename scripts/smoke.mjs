@@ -122,7 +122,10 @@ async function main() {
   check(
     "tools/list",
     JSON.stringify(names) ===
-      JSON.stringify(["git_commit", "git_diff", "git_discard", "git_log", "git_stage", "git_status", "git_unstage"]),
+      JSON.stringify([
+        "git_blob", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_stage",
+        "git_stash", "git_stash_apply", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
+      ]),
     names.join(",")
   );
   const statusTool = tools.tools.find((t) => t.name === "git_status");
@@ -145,6 +148,7 @@ async function main() {
   check("git_status staged has new.txt", r.payload?.staged?.some((e) => e.path === "new.txt" && e.code === "A"));
   check("git_status unstaged has hello.txt", r.payload?.unstaged?.some((e) => e.path === "hello.txt" && e.code === "M"));
   check("git_status untracked none after add", !r.payload?.unstaged?.some((e) => e.code === "?"));
+  check("git_status stashes=0", r.payload?.stashes === 0, JSON.stringify(r.payload?.stashes));
 
   // git_diff unstaged
   r = await call("git_diff", { path: "hello.txt" });
@@ -179,6 +183,88 @@ async function main() {
   // git_log
   r = await call("git_log", { limit: 5 });
   check("git_log", !r.isError && r.payload?.commits?.length === 2 && r.payload?.commits?.[0]?.subject === "feat: smoke commit");
+
+  // --- stash suite -----------------------------------------------------------
+  await writeFile(path.join(repo, "hello.txt"), "line1\nline2\nstashed\n");
+  r = await call("git_stash", {});
+  check("git_stash pushes all changes", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
+  check("git_stash leaves tree clean", r.payload?.status?.unstaged?.length === 0);
+  check("git_stash stashes=1", r.payload?.status?.stashes === 1, JSON.stringify(r.payload?.status?.stashes));
+  r = await call("git_stash_list", {});
+  check(
+    "git_stash_list one entry",
+    !r.isError && r.payload?.entries?.length === 1 && r.payload.entries[0].ref === "stash@{0}",
+    JSON.stringify(r.payload?.entries)
+  );
+  r = await call("git_stash_apply", { ref: "stash@{0}" });
+  check(
+    "git_stash_apply restores and keeps entry",
+    !r.isError && r.payload?.status?.stashes === 1 && r.payload?.status?.unstaged?.some((e) => e.path === "hello.txt"),
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  r = await call("git_stash_apply", { ref: "bogus" });
+  check("git_stash_apply rejects invalid ref", r.isError);
+  // 先丢弃 apply 带回的改动，pop 才不会冲突
+  await call("git_discard", { paths: ["hello.txt"] });
+  r = await call("git_stash_pop", {});
+  check("git_stash_pop removes entry", !r.isError && r.payload?.status?.stashes === 0, r.isError ? r.raw.content?.[0]?.text : "");
+  check("git_stash_pop restores changes", r.payload?.status?.unstaged?.some((e) => e.path === "hello.txt"));
+  r = await call("git_status", {});
+  check("git_status stashes back to 0", r.payload?.stashes === 0);
+  // 收尾：丢弃 pop 带回的改动，保持后续断言环境干净
+  await call("git_discard", { paths: ["hello.txt"] });
+
+  // --- pull without upstream must error --------------------------------------
+  r = await call("git_pull", {});
+  check("git_pull without upstream errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+
+  // --- git_diff scope（上下文范围：line/function/file）------------------------
+  const wide = Array.from({ length: 60 }, (_, i) => `line${i + 1} content`).join("\n") + "\n";
+  await writeFile(path.join(repo, "wide.txt"), wide);
+  await g(["add", "wide.txt"]);
+  const wideMod = wide.replace("line1 content", "line1 modified").replace("line60 content", "line60 modified");
+  await writeFile(path.join(repo, "wide.txt"), wideMod);
+  r = await call("git_diff", { path: "wide.txt" });
+  check(
+    "git_diff default context hides middle",
+    !r.isError && r.payload?.text?.includes("+line1 modified") && !r.payload?.text?.includes("line30 content"),
+    ""
+  );
+  r = await call("git_diff", { path: "wide.txt", scope: "file" });
+  check("git_diff scope=file shows middle", !r.isError && r.payload?.text?.includes("line30 content"));
+  r = await call("git_diff", { path: "wide.txt", scope: "function" });
+  check("git_diff scope=function ok", !r.isError && r.payload?.text?.includes("+line1 modified"));
+  // 还原：取消暂存并丢弃
+  await call("git_unstage", { paths: ["wide.txt"] });
+  await call("git_discard", { paths: ["wide.txt"] });
+
+  // --- git_blob（图片预览比对的数据源）----------------------------------------
+  r = await call("git_blob", { path: "hello.txt", rev: "worktree" });
+  check("git_blob worktree text", !r.isError && r.payload?.text?.includes("line1"), r.isError ? r.raw.content?.[0]?.text : "");
+  r = await call("git_blob", { path: "hello.txt", rev: "HEAD" });
+  check("git_blob HEAD rev", !r.isError && r.payload?.text?.includes("line2"));
+  const PNG_1PX = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  await writeFile(path.join(repo, "img.png"), PNG_1PX);
+  await g(["add", "img.png"]);
+  r = await call("git_blob", { path: "img.png", rev: "index" });
+  check(
+    "git_blob image base64 roundtrip",
+    !r.isError && r.payload?.mime === "image/png" && Buffer.from(r.payload.base64, "base64").equals(PNG_1PX),
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  await writeFile(path.join(repo, "big.png"), Buffer.alloc(3 * 1024 * 1024 + 10, 7));
+  await g(["add", "big.png"]);
+  r = await call("git_blob", { path: "big.png", rev: "index" });
+  check("git_blob oversize tooLarge", !r.isError && r.payload?.tooLarge === true);
+  await writeFile(path.join(repo, "data.bin"), Buffer.from([1, 0, 2, 0, 255]));
+  await g(["add", "data.bin"]);
+  r = await call("git_blob", { path: "data.bin", rev: "index" });
+  check("git_blob non-image binary flag", !r.isError && r.payload?.binary === true);
+  // 还原暂存区（后续「空暂存区提交报错」断言依赖）
+  await call("git_unstage", { paths: ["img.png", "big.png", "data.bin"] });
 
   // commit with empty index must error
   r = await call("git_commit", { message: "should fail" });
@@ -222,6 +308,25 @@ async function main() {
   // path traversal guard
   r = await call("git_stage", { paths: ["../outside.txt"] });
   check("path traversal rejected", r.isError);
+
+  // git_status in a non-repo directory must NOT be an error (host refuses to
+  // load the panel UI when the open-time tool call returns isError)
+  const nonRepo = await mkdtemp(path.join(tmpdir(), "git-plugin-norepo-"));
+  child.kill();
+  buffer = "";
+  pending.clear();
+  start(nonRepo);
+  await send("initialize", {
+    protocolVersion: "2025-06-18",
+    capabilities: {},
+    clientInfo: { name: "smoke", version: "0.0.0" },
+  });
+  await send("notifications/initialized", {}, true);
+  r = await call("git_status", {});
+  check("git_status non-repo is not isError", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
+  check("git_status non-repo ok:false", r.payload?.ok === false && r.payload?.reason === "not_a_git_repo", JSON.stringify(r.payload?.reason));
+  child.kill();
+  await rm(nonRepo, { recursive: true, force: true }).catch(() => {});
 
   child.kill();
   await rm(repo, { recursive: true, force: true }).catch(() => {});
