@@ -1,63 +1,105 @@
 # zcode-plugin-git
 
-ZCode 插件：Git 工作台侧栏面板（MCP Apps）+ AI 生成提交信息。
+Git workbench side panel for ZCode, built on MCP Apps — review, stage, and commit changes without leaving the chat, with AI-generated commit messages.
 
-## 功能
+English | [简体中文](README.zh-CN.md)
 
-- **侧栏 Git 面板**（右侧栏，MCP Apps 标准）：查看分支、ahead/behind、暂存区/工作区修改列表（含重命名、冲突、未跟踪）
-- **两种视图**：平铺列表 / 目录树结构（可折叠目录、单链目录自动合并 a/b/c），偏好记忆在 localStorage
-- **两种 diff**：点击文件行内展开统一 diff，工具条可切换**并排对照视图**（行号沟槽，统一视图同样带行号）与**上下文范围**（±10 行 / ±20 行 / 整个文件，偏好记忆），支持**上一个 / 下一个更改**跳转，右侧**迷你地图**缩略条（增删着色、视口指示、点击/拖动定位），弹层高度约半屏；**图片文件自动切换为「旧版 | 新版」并排预览比对**（暂存/工作区/HEAD 各版本，>2MB 提示跳过）
-- **文件操作**：添加到暂存（git add）、取消暂存还原到工作区（git restore --staged）、撤销工作区修改（git restore / 删除未跟踪文件，悬停浮现图标按钮 + 行内二次确认）、分区头悬停出现**全部暂存 / 全部取消暂存 / 全部撤销**（撤销含未跟踪文件，同样二次确认）
-- **拉取与存储**：一键 `git pull`；stash 菜单支持存储全部改动（含未跟踪）、恢复最近一次存储、按条目应用（保留条目），按钮带存储数量角标
-- **AI 生成提交信息**：面板「✨ AI 生成」按钮走宿主模型采样（`sampling/createMessage`），基于暂存 diff 生成 Conventional Commits 风格信息；可展开「自定义提示词」附加风格/语言/格式要求（内容记忆）；聊天里也可用 `/git:commit` 斜杠命令由模型生成并提交
-- **提交**：提交框内 Ctrl+Enter 或「提交」按钮，一键提交暂存区
-- **自动跟进**：面板可见时每 3s 轮询状态，外部（编辑器/命令行/agent）改动文件后列表自动刷新；已展开的 diff 静默跟进，暂存/取消暂存后展开行自动跟随迁移到目标分区
+## Features
 
-## 目录
+- **Git side panel** — branches, ahead/behind, staged & working-tree changes (renames, conflicts, and untracked files included)
+- **List & tree views** — collapsible directory tree with single-child chains merged (`a/b/c`); view preference remembered
+- **Diff viewer** — inline unified diff per file, switchable side-by-side compare, adjustable context (±10 / ±20 lines / full file), previous/next change navigation, and a minimap overview (add/del coloring, viewport indicator, click/drag to jump)
+- **Image compare** — image files open as an old-vs-new side-by-side preview across staged / worktree / HEAD versions (>2MB is skipped with a hint)
+- **File actions** — stage, unstage, and discard (inline confirmation for destructive ones), plus bulk actions per section
+- **Pull & stash** — one-click `git pull`; stash push (including untracked), pop, apply, and list with a count badge
+- **AI commit messages** — generate Conventional Commits messages from the staged diff via host model sampling (`sampling/createMessage`), with an optional custom prompt; also available as the `/git:commit` slash command
+- **Live updates** — status refreshes every 3s while the panel is visible; open diffs follow their files across stage/unstage
+
+<p align="center">
+  <img src="docs/screenshot-panel.png" width="300" alt="Git workbench panel" />
+  &nbsp;&nbsp;&nbsp;
+  <img src="docs/screenshot-diff.png" width="460" alt="Side-by-side diff with syntax highlighting and minimap" />
+</p>
+
+## Requirements
+
+- ZCode host with MCP Apps support
+- Node.js ≥ 18
+- `git` on PATH
+
+## Install
+
+Built artifacts are committed under `plugins/git/dist/`, so installing from a checkout needs no build step.
+
+### Add as a marketplace source (recommended)
+
+```bash
+zcode plugins marketplace add https://github.com/wudx/zcode-plugin-git
+```
+
+Then install the **Git 工具** plugin from the marketplace and open the Git panel in the sidebar.
+
+### From source
+
+```bash
+git clone https://github.com/wudx/zcode-plugin-git
+cd zcode-plugin-git
+npm install
+npm run build
+zcode plugins marketplace add /path/to/zcode-plugin-git
+```
+
+## Development
+
+```bash
+npm install                    # esbuild + MCP SDK (build-time only)
+npm run build                  # bundle server + panel into plugins/git/dist/
+npm run smoke                  # MCP protocol smoke tests against a temp git repo
+node scripts/serve-panel.mjs   # open http://127.0.0.1:8137/mock to test the panel UI
+```
+
+After changing source, run `npm run build`, then refresh the marketplace and update the plugin in ZCode (source is not hot-reloaded).
+
+## Project layout
 
 ```
 plugins/
-  marketplace.json          本地测试市场清单（dev-zcode-plugin-git-e73aa4b8）
+  marketplace.json              Marketplace manifest (add this repo as a source)
   git/
-    .zcode-plugin/plugin.json   插件 manifest（ui.surfaces 声明侧栏面板）
-    commands/commit.md          /git:commit 斜杠命令
-    server/server.mjs           MCP server 源码（13 个 git 工具 + 面板资源服务）
-    ui/src/main.js              面板源码（vanilla JS + @modelcontextprotocol/ext-apps）
-    ui/src/panel.css            面板样式（宿主主题变量 + 回退）
-    dist/server.mjs             打包产物（esbuild，零运行时依赖）
-    dist/ui/panel.html          打包产物（内联全部 JS/CSS）
+    .zcode-plugin/plugin.json   Plugin manifest (sidebar surface + MCP server)
+    commands/commit.md          /git:commit slash command
+    icon.png
+    server/server.mjs           MCP server source (14 git tools + panel resource)
+    ui/src/                     Panel source (vanilla JS + @modelcontextprotocol/ext-apps)
+    dist/                       Build output (committed — what actually runs)
+      server.mjs                Bundled MCP server (zero runtime dependencies)
+      ui/panel.html             Panel page with all JS/CSS inlined
 scripts/
-  build.mjs                 打包：node scripts/build.mjs
-  smoke.mjs                 MCP 协议冒烟测试（临时 git 仓库，46 项断言）
-  serve-panel.mjs           面板 UI 测试床静态服务
-  mock-host.html            Mock ZCode 宿主（ui/initialize + 工具/采样桩）
+  build.mjs                     Build script
+  smoke.mjs                     MCP protocol smoke tests
+  serve-panel.mjs               Static server for the panel test bench
+  mock-host.html                Mock ZCode host (ui/initialize + tool/sampling stubs)
 ```
 
-## 开发
+## MCP tools
 
-```bash
-npm install          # 安装 esbuild / MCP SDK（仅构建期）
-npm run build        # 重新打包 server + panel
-npm run smoke        # 冒烟测试（需本机 git）
-node scripts/serve-panel.mjs   # 浏览器打开 http://127.0.0.1:8137/mock 实测面板 UI
-```
-
-改动源码后 `npm run build`，然后在 ZCode 里刷新市场并更新插件（源码不会热加载）。
-
-## 工具清单（MCP）
-
-| 工具 | 说明 |
+| Tool | Description |
 | --- | --- |
-| `git_status` | 分支、ahead/behind、暂存/工作区/冲突文件列表、stash 数量 |
-| `git_diff` | 单文件 diff（staged=true 为暂存区 vs HEAD；未跟踪文件合成全新增 diff；scope=function 显示整个函数，scope=file 显示整个文件） |
-| `git_stage` | git add |
-| `git_unstage` | git restore --staged（首次提交前等价 git rm --cached） |
-| `git_discard` | 撤销工作区修改 / 删除未跟踪文件（危险） |
-| `git_commit` | 提交暂存区（-F - 读 stdin，UTF-8 多行信息） |
-| `git_log` | 最近提交历史 |
-| `git_pull` | git pull --no-edit，拉取并合并上游 |
-| `git_stash` | git stash push -u，存储全部改动（含未跟踪） |
-| `git_stash_pop` | git stash pop，恢复最近一次存储并移除条目 |
-| `git_stash_apply` | git stash apply <ref>，应用指定条目（保留） |
-| `git_stash_list` | stash 列表（ref + 说明） |
-| `git_blob` | 读取文件在 worktree/index/HEAD 版本的内容（图片 base64，供面板预览比对） |
+| `git_status` | Branch, ahead/behind, staged/worktree/conflict file lists, stash count |
+| `git_diff` | Single-file diff (`staged=true` for index vs HEAD; untracked files become an all-added diff; `scope=function`/`file` for wider context) |
+| `git_stage` | `git add` |
+| `git_unstage` | `git restore --staged` (equals `git rm --cached` before the first commit) |
+| `git_discard` | Discard worktree changes / delete untracked files (dangerous) |
+| `git_commit` | Commit the index (message read from stdin, multi-line UTF-8) |
+| `git_log` | Recent commit history |
+| `git_pull` | `git pull --no-edit` |
+| `git_push` | Push the current branch to its upstream (sets upstream with `-u` automatically for new branches) |
+| `git_stash` | `git stash push -u` (includes untracked files) |
+| `git_stash_pop` | Pop the latest stash entry |
+| `git_stash_apply` | Apply a stash entry (keep it) |
+| `git_stash_list` | List stash entries (ref + subject) |
+| `git_blob` | Read a file's content at worktree/index/HEAD (images as base64 for panel preview) |
+
+## License
+
+[MIT](LICENSE)
