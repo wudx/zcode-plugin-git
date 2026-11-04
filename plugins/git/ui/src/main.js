@@ -1,7 +1,7 @@
 /* Git workbench panel for ZCode (MCP Apps view). 入口：事件接线、AI 生成、轮询与启动。 */
 import { t, setLocale } from "./i18n.js";
 import { ICONS } from "./icons.js";
-import { lsSet } from "./storage.js";
+import { lsGet, lsSet } from "./storage.js";
 import {
   status, busy, treeMode, customPrompt, promptOpen, lastStatusJson,
   stashOpen, setStashOpen, setTreeMode, setCustomPrompt, setPromptOpen,
@@ -83,6 +83,64 @@ $("prompt-area").addEventListener("input", () => {
 // Ctrl+Enter to commit
 $("commit-msg").addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter") $("commit-btn").click();
+});
+
+// ---------------------------------------------------------------------------
+// 底部区域高度：拖 #bar-resizer（commit-bar 顶边）调整输入框高度，持久化；
+// 双击恢复默认，↑↓ 微调。存值空串 = 未自定义。
+// ---------------------------------------------------------------------------
+
+const BAR_H_KEY = "zcode-git.barH";
+const BAR_H_DEFAULT = 56;
+const BAR_H_MIN = 36;
+
+function clampBarH(px) {
+  // 上限留给上方文件列表至少 30% 面板高度
+  const max = Math.max(BAR_H_MIN + 1, Math.floor(window.innerHeight * 0.7));
+  return Math.min(max, Math.max(BAR_H_MIN, Math.round(px)));
+}
+function applyBarH(px) {
+  $("commit-msg").style.height = clampBarH(px) + "px";
+}
+function storedBarH() {
+  const v = parseInt(lsGet(BAR_H_KEY), 10);
+  return Number.isFinite(v) ? clampBarH(v) : BAR_H_DEFAULT;
+}
+applyBarH(storedBarH());
+
+const resizer = $("bar-resizer");
+let barDrag = null; // { y, h }
+resizer.addEventListener("pointerdown", (e) => {
+  barDrag = { y: e.clientY, h: $("commit-msg").offsetHeight };
+  // 合成指针事件（自动化测试/宿主注入）没有活动指针，capture 会抛 NotFoundError
+  try {
+    resizer.setPointerCapture(e.pointerId);
+  } catch { /* 拖拽仍可工作，仅失去元素外跟踪 */ }
+  resizer.classList.add("drag");
+  document.body.style.userSelect = "none";
+});
+resizer.addEventListener("pointermove", (e) => {
+  if (barDrag) applyBarH(barDrag.h - (e.clientY - barDrag.y));
+});
+function endBarDrag() {
+  if (!barDrag) return;
+  barDrag = null;
+  resizer.classList.remove("drag");
+  document.body.style.userSelect = "";
+  lsSet(BAR_H_KEY, String(clampBarH($("commit-msg").offsetHeight)));
+}
+resizer.addEventListener("pointerup", endBarDrag);
+resizer.addEventListener("pointercancel", endBarDrag);
+resizer.addEventListener("dblclick", () => {
+  applyBarH(BAR_H_DEFAULT);
+  lsSet(BAR_H_KEY, "");
+});
+resizer.addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+  e.preventDefault();
+  const cur = parseInt($("commit-msg").style.height, 10) || BAR_H_DEFAULT;
+  applyBarH(cur + (e.key === "ArrowUp" ? 16 : -16));
+  lsSet(BAR_H_KEY, String(clampBarH($("commit-msg").offsetHeight)));
 });
 
 // ---------------------------------------------------------------------------
@@ -205,6 +263,7 @@ function staticText() {
   $("prompt-area").placeholder = t.promptPlaceholder;
   $("ai-btn").textContent = `✨ ${t.aiGenerate}`;
   $("commit-msg").placeholder = t.commitPlaceholder;
+  $("bar-resizer").title = t.barResize;
   $("staged-title").textContent = t.stagedChanges;
   $("worktree-title").textContent = t.worktreeChanges;
   $("conflict-title").textContent = t.conflicts;
