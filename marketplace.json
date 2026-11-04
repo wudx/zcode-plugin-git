@@ -1,9 +1,9 @@
 {
-  "name": "dev-zcode-plugin-git-e73aa4b8",
+  "name": "zcode-plugin-git",
   "plugins": [
     {
       "name": "git",
-      "source": "./git",
+      "source": "./plugins/git",
       "version": "0.5.0",
       "description": "Git workbench side panel: review staged and working-tree changes (list/tree, unified/side-by-side diff), stage/unstage/discard, pull, push, stash, commit, and AI commit messages.",
       "displayName": "Git 工具",

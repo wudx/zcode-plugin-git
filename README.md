@@ -63,8 +63,8 @@ After changing source, run `npm run build`, then refresh the marketplace and upd
 ## Project layout
 
 ```
+marketplace.json                Marketplace manifest (add this repo as a source)
 plugins/
-  marketplace.json              Marketplace manifest (add this repo as a source)
   git/
     .zcode-plugin/plugin.json   Plugin manifest (sidebar surface + MCP server)
     commands/commit.md          /git:commit slash command

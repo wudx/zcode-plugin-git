@@ -63,8 +63,8 @@ node scripts/serve-panel.mjs   # 浏览器打开 http://127.0.0.1:8137/mock 实�
 ## 目录结构
 
 ```
+marketplace.json                市场清单（把本仓库添加为市场源即用）
 plugins/
-  marketplace.json              市场清单（把本仓库添加为市场源即用）
   git/
     .zcode-plugin/plugin.json   插件 manifest（侧栏面板 + MCP server）
     commands/commit.md          /git:commit 斜杠命令
