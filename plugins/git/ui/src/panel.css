@@ -246,20 +246,27 @@ body {
   overflow: auto;
   font: 11px/1.55 var(--mono);
   white-space: pre;
+  tab-size: 4;
 }
-/* 统一视图行号沟槽：::before 渲染 data-ln，行元素 textContent 保持纯代码 */
-.diff > span::before {
+/* 统一视图行号沟槽：::before 渲染 data-ln，行元素 textContent 保持纯代码；
+   只给带行号的行渲染（hunk/文件头不再空出沟槽），sticky 钉住横向滚动，
+   铺成所在行的实际底色遮挡滑过的代码，min-width 容纳更长行号 */
+.diff > span[data-ln]::before {
   content: attr(data-ln);
   display: inline-block;
-  width: 3em;
-  margin-right: 6px;
+  position: sticky;
+  left: 0;
+  min-width: 3em;
+  padding: 0 6px;
   text-align: right;
-  color: inherit;
-  opacity: 0.55;
+  color: var(--git-fg-dim);
+  background: var(--git-bg-soft);
   user-select: none;
 }
-.dl-add { display: block; background: #3fb96818; color: #6fce8e; padding: 0 8px; }
-.dl-del { display: block; background: #f2555a18; color: #ff8b8e; padding: 0 8px; }
+.diff > .dl-add[data-ln]::before { background: linear-gradient(#3fb96826, #3fb96826), var(--git-bg-soft); }
+.diff > .dl-del[data-ln]::before { background: linear-gradient(#f2555a26, #f2555a26), var(--git-bg-soft); }
+.dl-add { display: block; background: #3fb96826; color: var(--git-fg); padding: 0 8px; }
+.dl-del { display: block; background: #f2555a26; color: var(--git-fg); padding: 0 8px; }
 .dl-hunk { display: block; color: var(--git-ren); padding: 0 8px; }
 .dl-meta { display: block; color: var(--git-fg-dim); padding: 0 8px; }
 
@@ -436,18 +443,19 @@ body {
 .split-scroll { flex: 1; overflow: auto; max-height: max(320px, 45vh); }
 .split-grid {
   display: grid;
-  grid-template-columns: 3em minmax(14em, max-content) 3em minmax(14em, max-content);
+  grid-template-columns: minmax(3em, max-content) minmax(14em, max-content) minmax(3em, max-content) minmax(14em, max-content);
   width: max-content;
   min-width: 100%;
   font: 11px/1.55 var(--mono);
   white-space: pre;
+  tab-size: 4;
 }
 .split-grid > span { padding: 0 4px; }
 .cell-num { color: var(--git-fg-dim); text-align: right; user-select: none; }
 .cell-num.num-r { border-left: 1px solid var(--git-border); }
 .cell-code { color: var(--git-fg); }
-.cell-del { background: #f2555a18; color: #ff8b8e; }
-.cell-add { background: #3fb96818; color: #6fce8e; }
+.cell-del { background: #f2555a26; color: var(--git-fg); }
+.cell-add { background: #3fb96826; color: var(--git-fg); }
 .cell-span { grid-column: 1 / -1; white-space: pre; padding: 0 8px; }
 
 /* diff 迷你地图（仿 VS Code）：右侧缩略行条 + 视口指示块 */
