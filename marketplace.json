@@ -4,6 +4,7 @@
     {
       "name": "git",
       "source": "./plugins/git",
+      "icon": "https://raw.githubusercontent.com/wudx/zcode-plugin-git/main/plugins/git/icon.png",
       "version": "0.5.0",
       "description": "Git workbench side panel: review staged and working-tree changes (list/tree, unified/side-by-side diff), stage/unstage/discard, pull, push, stash, commit, and AI commit messages.",
       "displayName": "Git 工具",
