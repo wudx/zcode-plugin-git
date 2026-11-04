@@ -35,6 +35,8 @@ $("view-btn").addEventListener("click", () => {
 
 $("pull-btn").addEventListener("click", () => runGitAction("git_pull", {}));
 
+$("push-btn").addEventListener("click", () => runGitAction("git_push", {}));
+
 $("stash-btn").addEventListener("click", (e) => {
   e.stopPropagation();
   if (stashOpen) {
@@ -254,6 +256,8 @@ function staticText() {
   applyViewIcon();
   $("pull-btn").innerHTML = ICONS.pull;
   $("pull-btn").title = t.pullTitle;
+  $("push-btn").innerHTML = ICONS.push;
+  $("push-btn").title = t.pushTitle;
   $("stash-btn-icon").innerHTML = ICONS.kebab;
   $("stash-btn").title = t.stashMenu;
   $("prompt-btn").innerHTML = ICONS.sliders;

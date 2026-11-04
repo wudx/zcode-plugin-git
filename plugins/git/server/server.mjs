@@ -1,5 +1,5 @@
 // Git workbench MCP server for ZCode.
-// Tools: status / diff / stage / unstage / discard / commit / log / pull / stash.
+// Tools: status / diff / stage / unstage / discard / commit / log / pull / push / stash.
 // Also serves the panel UI as an MCP Apps resource (ui://git/panel.html).
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -500,6 +500,33 @@ server.registerTool(
   withTool(async (top) => {
     const r = await runGit(["pull", "--no-edit"], { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git pull 失败");
+    return ok({ output: joinOutput(r), status: await getStatus() });
+  })
+);
+
+server.registerTool(
+  "git_push",
+  {
+    title: "推送到远程",
+    description:
+      "在当前分支执行 git push，把本地提交推送到上游远程分支。当前分支还没有上游（新分支首次推送）时，自动改用 origin（无 origin 则取唯一远程）以 -u 建立跟踪后重推；其余情况失败时报错，报错信息为 git 原始输出。",
+    inputSchema: {},
+    ...uiMeta,
+  },
+  withTool(async (top) => {
+    const r = await runGit(["push"], { cwd: top });
+    if (r.code !== 0 && r.stderr.includes("has no upstream branch")) {
+      // 无感兜底：新分支还没有上游，建跟踪后重推（LC_ALL=C 保证该文案稳定）
+      const remotes = await runGit(["remote"], { cwd: top });
+      const names = remotes.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+      const target = names.includes("origin") ? "origin" : names[0];
+      if (target) {
+        const r2 = await runGit(["push", "-u", target, "HEAD"], { cwd: top });
+        if (r2.code === 0) return ok({ output: joinOutput(r2), status: await getStatus() });
+        throw gitErr(r2, "git push 失败");
+      }
+    }
+    if (r.code !== 0) throw gitErr(r, "git push 失败");
     return ok({ output: joinOutput(r), status: await getStatus() });
   })
 );

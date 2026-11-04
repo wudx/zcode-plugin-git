@@ -114,7 +114,7 @@ export function updateCommitBar(stagedCount) {
 export async function runAction(fn) {
   if (busy) return;
   setBusy(true);
-  for (const id of ["view-btn", "pull-btn", "stash-btn"]) $(id).disabled = true;
+  for (const id of ["view-btn", "pull-btn", "push-btn", "stash-btn"]) $(id).disabled = true;
   try {
     await fn();
     await refresh();
@@ -122,7 +122,7 @@ export async function runAction(fn) {
     toast(t.actionFailed + String(err.message || err).split("\n")[0], "err");
   } finally {
     setBusy(false);
-    for (const id of ["view-btn", "pull-btn", "stash-btn"]) $(id).disabled = false;
+    for (const id of ["view-btn", "pull-btn", "push-btn", "stash-btn"]) $(id).disabled = false;
     updateCommitBar(status?.staged?.length || 0);
   }
 }

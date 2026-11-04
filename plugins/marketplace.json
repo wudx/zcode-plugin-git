@@ -4,14 +4,14 @@
     {
       "name": "git",
       "source": "./git",
-      "version": "0.4.5",
-      "description": "Git workbench side panel: review staged and working-tree changes (list/tree, unified/side-by-side diff), stage/unstage/discard, pull, stash, commit, and AI commit messages.",
+      "version": "0.5.0",
+      "description": "Git workbench side panel: review staged and working-tree changes (list/tree, unified/side-by-side diff), stage/unstage/discard, pull, push, stash, commit, and AI commit messages.",
       "displayName": "Git 工具",
       "displayName_i18n": {
         "zh-CN": "Git 工具"
       },
       "description_i18n": {
-        "zh-CN": "Git 工作台侧栏面板：列表/树结构查看暂存与工作区修改（统一/并排 diff），暂存/取消/撤销，图片新旧版并排比对，拉取与 stash，AI 生成提交信息并提交"
+        "zh-CN": "Git 工作台侧栏面板：列表/树结构查看暂存与工作区修改（统一/并排 diff），暂存/取消/撤销，图片新旧版并排比对，拉取/推送与 stash，AI 生成提交信息并提交"
       }
     }
   ]

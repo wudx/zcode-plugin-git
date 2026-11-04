@@ -123,7 +123,7 @@ async function main() {
     "tools/list",
     JSON.stringify(names) ===
       JSON.stringify([
-        "git_blob", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_stage",
+        "git_blob", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push", "git_stage",
         "git_stash", "git_stash_apply", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
       ]),
     names.join(",")
@@ -217,6 +217,50 @@ async function main() {
   // --- pull without upstream must error --------------------------------------
   r = await call("git_pull", {});
   check("git_pull without upstream errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+
+  // --- push suite（bare 远程 + 上游跟踪）--------------------------------------
+  r = await call("git_push", {});
+  check("git_push without upstream errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+  const remote = await mkdtemp(path.join(tmpdir(), "git-plugin-smoke-remote-"));
+  await g(["init", "--bare", remote]);
+  await g(["remote", "add", "origin", remote]);
+  await g(["push", "-u", "origin", "main"]);
+  await writeFile(path.join(repo, "pushed.txt"), "pushed\n");
+  await g(["add", "pushed.txt"]);
+  const pushMsgFile = path.join(repo, ".pushmsg");
+  await writeFile(pushMsgFile, "feat: to be pushed");
+  await g(["commit", "--file=" + pushMsgFile]);
+  await rm(pushMsgFile);
+  r = await call("git_push", {});
+  check("git_push ok", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
+  check(
+    "git_push status ahead=0 behind=0",
+    r.payload?.status?.ahead === 0 && r.payload?.status?.behind === 0,
+    JSON.stringify({ ahead: r.payload?.status?.ahead, behind: r.payload?.status?.behind })
+  );
+  const remoteLog = await g(["--git-dir", remote, "log", "--oneline", "main"]);
+  check("git_push commit reached remote", remoteLog.includes("feat: to be pushed"), remoteLog);
+  r = await call("git_push", {});
+  check("git_push up-to-date ok", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
+
+  // --- push 无感兜底：新分支无上游，但有 origin 时应自动 -u 建跟踪后重推 -------
+  await g(["checkout", "-b", "feat-x"]);
+  await writeFile(path.join(repo, "fb.txt"), "fallback\n");
+  await g(["add", "fb.txt"]);
+  const fbMsg = path.join(repo, ".fbmsg");
+  await writeFile(fbMsg, "feat: fallback push");
+  await g(["commit", "--file=" + fbMsg]);
+  await rm(fbMsg);
+  r = await call("git_push", {});
+  check("git_push new branch falls back to -u", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
+  check(
+    "git_push fallback sets upstream",
+    String(r.payload?.status?.upstream || "").includes("origin/feat-x"),
+    r.payload?.status?.upstream
+  );
+  const remoteFbLog = await g(["--git-dir", remote, "log", "--oneline", "feat-x"]);
+  check("git_push fallback commit on remote", remoteFbLog.includes("feat: fallback push"), remoteFbLog);
+  await g(["checkout", "main"]);
 
   // --- git_diff scope（上下文范围：line/function/file）------------------------
   const wide = Array.from({ length: 60 }, (_, i) => `line${i + 1} content`).join("\n") + "\n";
@@ -331,6 +375,7 @@ async function main() {
   child.kill();
   await rm(repo, { recursive: true, force: true }).catch(() => {});
   await rm(repo2, { recursive: true, force: true }).catch(() => {});
+  await rm(remote, { recursive: true, force: true }).catch(() => {});
 
   console.log("\n=== smoke results ===");
   for (const [s, n, extra] of results) console.log(`${s}  ${n}${extra ? "  — " + extra : ""}`);

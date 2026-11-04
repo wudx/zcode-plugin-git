@@ -271,6 +271,10 @@ function toolResult(name, args) {
     }
     case "git_pull":
       return { content: [{ type: "text", text: JSON.stringify({ output: "Already up to date.", status: state }) }] };
+    case "git_push": {
+      state = { ...state, ahead: 0 };
+      return { content: [{ type: "text", text: JSON.stringify({ output: "To E:/demo-project\n   9f01c3a..2b77e10  " + state.branch + " -> " + state.branch, status: state }) }] };
+    }
     case "git_blob": {
       // 生成旧/新两张占位图，验证图片比对视图
       const canvas = document.createElement("canvas");
