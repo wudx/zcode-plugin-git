@@ -6,7 +6,7 @@ import { t } from "./i18n.js";
 import { ICONS } from "./icons.js";
 import { status, expanded, treeMode, scopeArgs, stagedCollapsed, worktreeCollapsed } from "./state.js";
 import { callTool } from "./api.js";
-import { $, iconBtn, confirmUI } from "./dom.js";
+import { $, el, iconBtn, confirmUI } from "./dom.js";
 import { rowEl, treeEl } from "./rows.js";
 import { diffEl, loadImages } from "./diffbox.js";
 import { IMAGE_RE } from "./diffview.js";
@@ -23,7 +23,12 @@ export function render() {
   br.title = status.repo || "";
   const ab = $("ahead-behind");
   if (status.upstream && (status.ahead || status.behind)) {
-    ab.textContent = `↑${status.ahead} ↓${status.behind}`;
+    // 领先/落后分色：绿=待推送，黄=待拉取
+    ab.replaceChildren(
+      el("span", "ab-ahead", `↑${status.ahead}`),
+      document.createTextNode(" "),
+      el("span", "ab-behind", `↓${status.behind}`),
+    );
     ab.hidden = false;
   } else ab.hidden = true;
 
