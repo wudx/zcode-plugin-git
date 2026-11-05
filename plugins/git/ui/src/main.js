@@ -18,6 +18,10 @@ const POLL_MS = 3000;
 // AI 生成：输出预算给足余量（思考型模型的思考 token 也计入输出，宿主会按模型上限截断）
 const AI_MAX_TOKENS = 4000;
 const AI_DIFF_BUDGET = 80000;
+// 单文件 diff 上限：防一个巨文件吃光预算，后续文件还有机会进入 prompt
+const AI_FILE_CAP = 20000;
+// 压缩产物判定：diff 足够长且平均行长爆表（dist 压缩 HTML/JS 一行上万字符），对生成无信息量
+const AI_MINIFIED_AVG_LINE = 500;
 
 // ---------------------------------------------------------------------------
 // top-level events
@@ -169,8 +173,8 @@ resizer.addEventListener("keydown", (e) => {
 // AI commit message
 // ---------------------------------------------------------------------------
 
-function buildPrompt(diff) {
-  const lines = [t.promptIntro, t.promptRules, "", diff];
+function buildPrompt(manifest, diff) {
+  const lines = [t.promptIntro, t.promptRules, "", t.promptFiles, manifest.join("\n"), "", diff];
   const extra = customPrompt.trim();
   if (extra !== "") {
     lines.push("", t.promptExtra, extra);
@@ -190,24 +194,34 @@ async function generateCommitMessage() {
     btn.disabled = true;
     btn.textContent = t.aiThinking;
     const st = status || (await callTool("git_status", {}));
+    const staged = st.staged || [];
+    if (!staged.length) {
+      toast(t.nothingStaged, "err");
+      return;
+    }
+    // 变更文件清单随 prompt 恒发：diff 被截断/省略时模型仍能看到改动全貌
+    const manifest = staged.map((e) => `${e.code} ${e.path}`);
     const parts = [];
     let total = 0;
-    for (const e of st.staged || []) {
+    for (const e of staged) {
       const d = await callTool("git_diff", { path: e.path, staged: true });
-      const text = d?.binary ? `Binary file changed: ${e.path}` : d?.text || "";
+      let text = d?.binary ? `Binary file changed: ${e.path}` : d?.text || "";
+      // 压缩产物（构建输出）只留清单标注，diff 全文跳过，把预算让给源码
+      if (!d?.binary && text.length > 2000 && text.length / (text.split("\n").length) > AI_MINIFIED_AVG_LINE) {
+        manifest.push(`  (${e.path}: diff omitted — minified build output)`);
+        continue;
+      }
+      if (text.length > AI_FILE_CAP) text = `${text.slice(0, AI_FILE_CAP)}\n…(diff truncated for ${e.path})`;
+      // 超预算的文件跳过（不 break），后续小文件照常进入 prompt
       if (total + text.length > AI_DIFF_BUDGET) {
-        parts.push(`(diff truncated for ${e.path})`);
-        break;
+        manifest.push(`  (${e.path}: diff omitted — over budget)`);
+        continue;
       }
       total += text.length;
       parts.push(text);
     }
-    if (!parts.length) {
-      toast(t.nothingStaged, "err");
-      return;
-    }
     const result = await app.createSamplingMessage({
-      messages: [{ role: "user", content: { type: "text", text: buildPrompt(parts.join("\n")) } }],
+      messages: [{ role: "user", content: { type: "text", text: buildPrompt(manifest, parts.join("\n")) } }],
       maxTokens: AI_MAX_TOKENS,
       systemPrompt:
         "You generate git commit messages. Output ONLY the commit message text itself — no explanations, no quotes, no markdown code fences. First line: concise imperative subject (optionally with type(scope): prefix), then a blank line and short bullet points if useful.",
