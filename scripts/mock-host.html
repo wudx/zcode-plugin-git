@@ -323,6 +323,47 @@ function toolResult(name, args) {
       const b64 = canvas.toDataURL("image/png").split(",")[1];
       return { content: [{ type: "text", text: JSON.stringify({ path: args.path, rev: args.rev, mime: "image/png", base64: b64, size: 2048 }) }] };
     }
+    case "git_show": {
+      // 9f01c3a 多文件（新增 ts + README 修改，验证逐文件语法高亮），2b77e10 单文件小改动
+      const SHOWS = {
+        "9f01c3a": `diff --git a/src/git/client.ts b/src/git/client.ts
+new file mode 100644
+index 0000000..a3f9c21
+--- /dev/null
++++ b/src/git/client.ts
+@@ -0,0 +1,8 @@
++import { spawn } from "node:child_process";
++
++export function runGit(args: string[], cwd: string) {
++  const child = spawn("git", args, { cwd });
++  return new Promise((resolve, reject) => {
++    child.on("close", (code) => (code === 0 ? resolve("") : reject(new Error("git failed"))));
++  });
++}
+diff --git a/README.md b/README.md
+index 9c8f2a1..b7d3e44 100644
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,5 @@
+ # demo-project
++
++## Git workbench
+
+ WIP`,
+        "2b77e10": `diff --git a/package.json b/package.json
+index 1a2b3c4..5d6e7f8 100644
+--- a/package.json
++++ b/package.json
+@@ -1,5 +1,6 @@
+ {
+   "name": "demo-project",
++  "version": "1.1.0",
+   "private": true
+ }`,
+      };
+      const text = SHOWS[String(args.hash)] ?? "";
+      return { content: [{ type: "text", text: JSON.stringify({ hash: args.hash, binary: false, truncated: false, text }) }] };
+    }
     case "git_log":
       return { content: [{ type: "text", text: JSON.stringify({ commits: [
         { hash: "9f01c3a", author: "wudx", date: "2026-11-04", subject: "feat(git): add workbench panel" },

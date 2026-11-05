@@ -4,8 +4,8 @@ import { ICONS } from "./icons.js";
 import { lsGet, lsSet } from "./storage.js";
 import {
   status, busy, treeMode, customPrompt, promptOpen, lastStatusJson,
-  stashOpen, branchOpen, stagedCollapsed, worktreeCollapsed,
-  setStashOpen, setBranchOpen, setTreeMode, setCustomPrompt, setPromptOpen,
+  stashOpen, branchOpen, historyOpen, stagedCollapsed, worktreeCollapsed,
+  setStashOpen, setBranchOpen, setHistoryOpen, setTreeMode, setCustomPrompt, setPromptOpen,
   setStagedCollapsed, setWorktreeCollapsed,
 } from "./state.js";
 import { app, callTool } from "./api.js";
@@ -13,6 +13,7 @@ import { $ } from "./dom.js";
 import { render } from "./render.js";
 import { loadStashList, closeStash, runGitAction } from "./stash.js";
 import { loadBranchList, closeBranchMenu } from "./branches.js";
+import { loadHistory, closeHistory } from "./history.js";
 import { applyStatus, refresh, runAction, toast, updateCommitBar, showFatal } from "./actions.js";
 
 const POLL_MS = 3000;
@@ -65,6 +66,7 @@ $("push-btn").addEventListener("click", () => runGitAction("git_push", {}));
 $("stash-btn").addEventListener("click", (e) => {
   e.stopPropagation();
   if (branchOpen) closeBranchMenu();
+  if (historyOpen) closeHistory();
   if (stashOpen) {
     closeStash();
   } else {
@@ -73,13 +75,27 @@ $("stash-btn").addEventListener("click", (e) => {
   }
 });
 
-// 分支菜单：点击 header 分支名（或回车/空格）开关；两个菜单互斥
+// 历史菜单：点击 header 时钟按钮开关；三个菜单互斥
+$("history-btn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (stashOpen) closeStash();
+  if (branchOpen) closeBranchMenu();
+  if (historyOpen) {
+    closeHistory();
+  } else {
+    setHistoryOpen(true);
+    loadHistory();
+  }
+});
+
+// 分支菜单：点击 header 分支名（或回车/空格）开关；三个菜单互斥
 function toggleBranchMenu() {
   if (branchOpen) {
     closeBranchMenu();
     return;
   }
   if (stashOpen) closeStash();
+  if (historyOpen) closeHistory();
   setBranchOpen(true);
   loadBranchList();
 }
@@ -94,11 +110,13 @@ $("branch").addEventListener("keydown", (e) => {
 document.addEventListener("pointerdown", (e) => {
   if (stashOpen && !$("stash-menu").contains(e.target) && !$("stash-btn").contains(e.target)) closeStash();
   if (branchOpen && !$("branch-menu").contains(e.target) && !$("branch").contains(e.target)) closeBranchMenu();
+  if (historyOpen && !$("history-menu").contains(e.target) && !$("history-btn").contains(e.target)) closeHistory();
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
   if (stashOpen) closeStash();
   if (branchOpen) closeBranchMenu();
+  if (historyOpen) closeHistory();
 });
 
 $("commit-btn").addEventListener("click", () => {
@@ -314,6 +332,8 @@ function staticText() {
   $("push-btn").title = t.pushTitle;
   $("stash-btn-icon").innerHTML = ICONS.kebab;
   $("stash-btn").title = t.stashMenu;
+  $("history-btn").innerHTML = ICONS.history;
+  $("history-btn").title = t.historyTitle;
   $("prompt-btn").innerHTML = ICONS.sliders;
   $("prompt-btn").title = t.promptCustomize;
   $("prompt-btn").classList.toggle("active", promptOpen);

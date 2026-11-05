@@ -13,6 +13,7 @@ import { IMAGE_RE } from "./diffview.js";
 import { attachMinimap } from "./minimap.js";
 import { renderStashMenu } from "./stash.js";
 import { renderBranchMenu } from "./branches.js";
+import { renderHistoryMenu } from "./history.js";
 import { runAction, updateCommitBar } from "./actions.js";
 
 export function render() {
@@ -108,6 +109,7 @@ export function render() {
   updateCommitBar(staged.length);
   renderStashMenu();
   renderBranchMenu();
+  renderHistoryMenu();
 }
 
 function mkAllButton(box, icon, label, paths, tool, needConfirm = false) {

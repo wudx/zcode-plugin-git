@@ -124,7 +124,7 @@ async function main() {
     JSON.stringify(names) ===
       JSON.stringify([
         "git_blob", "git_branch_delete", "git_branch_list", "git_checkout", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push",
-        "git_stage", "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
+        "git_show", "git_stage", "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
       ]),
     names.join(",")
   );
@@ -183,6 +183,26 @@ async function main() {
   // git_log
   r = await call("git_log", { limit: 5 });
   check("git_log", !r.isError && r.payload?.commits?.length === 2 && r.payload?.commits?.[0]?.subject === "feat: smoke commit");
+  const commits = r.payload?.commits || [];
+
+  // git_show：HEAD 提交只含 new.txt（hello.txt 已被 git_discard 还原，提交时无改动）；
+  // 根提交 init: hello 含 hello.txt 的全新增
+  r = await call("git_show", { hash: commits[0]?.hash });
+  check(
+    "git_show diff",
+    !r.isError && r.payload?.text?.includes("+++ b/new.txt") && r.payload?.text?.includes("+brand new"),
+    r.isError ? r.raw.content?.[0]?.text : JSON.stringify(r.payload).slice(0, 300)
+  );
+  r = await call("git_show", { hash: commits[1]?.hash });
+  check(
+    "git_show root commit",
+    !r.isError && r.payload?.text?.includes("+++ b/hello.txt") && r.payload?.text?.includes("+line2"),
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  r = await call("git_show", { hash: "-invalid" });
+  check("git_show rejects option-like hash", r.isError, JSON.stringify(r.payload));
+  r = await call("git_show", { hash: "deadbeef" });
+  check("git_show unknown hash errors", r.isError, "");
 
   // --- branch suite（本地分支列表与切换；feat-x 名字留给后面的 push 兜底套件）---
   await g(["branch", "branch-a"]);

@@ -12,6 +12,7 @@ English | [简体中文](README.zh-CN.md)
 - **Image compare** — image files open as an old-vs-new side-by-side preview across staged / worktree / HEAD versions (>2MB is skipped with a hint)
 - **File actions** — stage, unstage, and discard (inline confirmation for destructive ones), plus bulk actions per section
 - **Pull & stash** — one-click `git pull`; stash push (including untracked), pop, apply, and list with a count badge
+- **Commit history** — a clock button opens the recent commit list (paged load-more); click any commit to expand its full diff, switchable between unified and side-by-side views
 - **AI commit messages** — generate Conventional Commits messages from the staged diff via host model sampling (`sampling/createMessage`), with an optional custom prompt; also available as the `/git:commit` slash command
 - **Live updates** — status refreshes every 3s while the panel is visible; open diffs follow their files across stage/unstage
 
@@ -92,6 +93,7 @@ scripts/
 | `git_discard` | Discard worktree changes / delete untracked files (dangerous) |
 | `git_commit` | Commit the index (message read from stdin, multi-line UTF-8) |
 | `git_log` | Recent commit history |
+| `git_show` | Full diff of a commit (`--format=`; hash from git_log) |
 | `git_pull` | `git pull --no-edit` |
 | `git_push` | Push the current branch to its upstream (sets upstream with `-u` automatically for new branches) |
 | `git_stash` | `git stash push -u` (includes untracked files) |

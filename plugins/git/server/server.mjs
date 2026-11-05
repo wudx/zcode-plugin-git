@@ -69,6 +69,8 @@ const QP = ["-c", "core.quotepath=false"];
 // 未跟踪文件合成 diff 的行数上限；NUL 字节嗅探窗口（区分文本/二进制）
 const MAX_DIFF_LINES = 4000;
 const NUL_SNIFF_BYTES = 8000;
+// 分支名/起点/提交 hash 通配校验：拒绝选项注入（前导 -）、git 非法字符与范围语法
+const BRANCH_RE = /^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/;
 
 function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
   return new Promise((resolve, reject) => {
@@ -491,6 +493,25 @@ server.registerTool(
 );
 
 server.registerTool(
+  "git_show",
+  {
+    title: "查看提交 diff",
+    description:
+      "查看某次提交引入的完整变更（unified diff，含全部涉及文件，--format= 省略提交信息只留 diff）。hash 可用 git_log 返回的短 hash。合并提交默认无输出（text 为空），二进制变更只显示提示行。",
+    inputSchema: {
+      hash: z.string().regex(BRANCH_RE).describe("提交 hash（git_log 返回的短 hash）"),
+    },
+    ...uiMeta,
+  },
+  withTool(async (top, { hash }) => {
+    const r = await runGit([...QP, "show", "--no-color", "--format=", "-M", hash], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, "git show 失败");
+    const text = truncate(r.stdout);
+    return ok({ hash, binary: false, truncated: text !== r.stdout, text });
+  })
+);
+
+server.registerTool(
   "git_pull",
   {
     title: "拉取远程更新",
@@ -531,9 +552,6 @@ server.registerTool(
     return ok({ output: joinOutput(r), status: await getStatus() });
   })
 );
-
-// 分支名/起点通配校验：拒绝选项注入（前导 -）、git 非法字符与范围语法
-const BRANCH_RE = /^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/;
 
 server.registerTool(
   "git_branch_list",

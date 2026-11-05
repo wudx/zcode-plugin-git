@@ -24,6 +24,8 @@ export let stashOpen = false;
 export let stashState = null; // null | { phase: 'loading'|'ready'|'error', entries, error }
 export let branchOpen = false;
 export let branchState = null; // null | { phase: 'loading'|'ready'|'error', locals, remotes, error }
+export let historyOpen = false;
+export let historyState = null; // null | { phase: 'loading'|'ready'|'error', commits, limit, error }
 
 export function setStatus(fresh) {
   status = fresh;
@@ -42,6 +44,8 @@ export function setStashOpen(v) { stashOpen = v; }
 export function setStashState(v) { stashState = v; }
 export function setBranchOpen(v) { branchOpen = v; }
 export function setBranchState(v) { branchState = v; }
+export function setHistoryOpen(v) { historyOpen = v; }
+export function setHistoryState(v) { historyState = v; }
 export function setStagedCollapsed(v) {
   stagedCollapsed = v;
   lsSet("zcode-git.stagedCollapsed", v ? "1" : "0");
