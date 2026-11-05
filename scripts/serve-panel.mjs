@@ -14,10 +14,10 @@ createServer(async (req, res) => {
   const url = (req.url || "/").split("?")[0];
   try {
     if (url === "/panel.html") {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       res.end(await readFile(panel));
     } else if (url === "/mock" || url === "/") {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       res.end(await readFile(mock));
     } else {
       res.writeHead(404).end("not found");
