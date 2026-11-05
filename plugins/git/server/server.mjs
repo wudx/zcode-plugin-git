@@ -23,6 +23,7 @@ const PANEL_URI = `ui://${PLUGIN_NAME}/panel.html`;
 // BAD_PATH    路径非法 / 越界（assertSafePath）
 // GIT_ERROR   git 命令执行失败（gitErr）
 // EMPTY_STAGED 暂存区为空却尝试提交
+// BRANCH_UNMERGED 删除未合并的本地分支且未指定 force（git_branch_delete）
 // INTERNAL    其余未分类异常
 class ToolError extends Error {
   constructor(code, message) {
@@ -531,12 +532,15 @@ server.registerTool(
   })
 );
 
+// 分支名/起点通配校验：拒绝选项注入（前导 -）、git 非法字符与范围语法
+const BRANCH_RE = /^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/;
+
 server.registerTool(
   "git_branch_list",
   {
     title: "查看分支列表",
     description:
-      "查看分支列表，返回 locals 与 remotes 两个数组（按最近提交排序）。本地分支条目含 current（是否当前分支）、sha/subject（最新提交）、ahead/behind（相对上游，无上游为 0）；远程分支条目 name 为 origin/xxx 形式，current/ahead/behind 恒为 false/0。origin/HEAD 等符号引用已过滤。切换分支用 git_checkout。",
+      "查看分支列表，返回 locals 与 remotes 两个数组（按最近提交排序）。本地分支条目含 current（是否当前分支）、sha/subject（最新提交）、ahead/behind（相对上游，无上游为 0）；远程分支条目 name 为 origin/xxx 形式，current/ahead/behind 恒为 false/0。origin/HEAD 等符号引用已过滤。切换分支用 git_checkout，删除本地分支用 git_branch_delete。",
     inputSchema: {},
     ...uiMeta,
   },
@@ -577,9 +581,9 @@ server.registerTool(
     description:
       "切换到指定本地分支（git checkout <branch>）。create=true 时新建该分支并切换（git checkout -b），startPoint 可指定起点（如 origin/foo），默认当前 HEAD。工作区有未提交修改时 git 会尝试携带过去；会覆盖修改时拒绝执行并报错，报错信息为 git 原始输出。可先用 git_branch_list 查看分支。",
     inputSchema: {
-      branch: z.string().regex(/^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/).describe("本地分支名，如 feat-x"),
+      branch: z.string().regex(BRANCH_RE).describe("本地分支名，如 feat-x"),
       create: z.boolean().optional().describe("为 true 时新建该分支并切换（git checkout -b）"),
-      startPoint: z.string().regex(/^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/).optional().describe("新建分支的起点（本地分支名或 origin/xxx），默认当前 HEAD"),
+      startPoint: z.string().regex(BRANCH_RE).optional().describe("新建分支的起点（本地分支名或 origin/xxx），默认当前 HEAD"),
     },
     ...uiMeta,
   },
@@ -588,6 +592,31 @@ server.registerTool(
     const r = await runGit(args, { cwd: top });
     if (r.code !== 0) throw gitErr(r, `git checkout ${branch} 失败`);
     return ok({ output: joinOutput(r), branch, status: await getStatus() });
+  })
+);
+
+server.registerTool(
+  "git_branch_delete",
+  {
+    title: "删除本地分支",
+    description:
+      "删除指定的本地分支。默认 git branch -d，只允许删除已合并进上游或 HEAD 的分支；force=true 时改用 -D 强制删除，未合并的提交将丢失。不能删除当前所在的分支（git 会报错）。远程分支不受影响，可先用 git_branch_list 查看分支。",
+    inputSchema: {
+      name: z.string().regex(BRANCH_RE).describe("要删除的本地分支名"),
+      force: z.boolean().optional().describe("为 true 时强制删除未合并分支（git branch -D），未合并提交将丢失"),
+    },
+    ...uiMeta,
+  },
+  withTool(async (top, { name, force = false }) => {
+    const r = await runGit(["branch", force ? "-D" : "-d", name], { cwd: top });
+    if (r.code !== 0) {
+      // 未合并是可恢复决策（可改用 force），给独立错误码让 UI 走强制删除确认
+      if (!force && /not fully merged/.test(r.stderr)) {
+        throw new ToolError("BRANCH_UNMERGED", `分支 ${name} 有未合并提交：${(r.stderr || r.stdout).trim()}`);
+      }
+      throw gitErr(r, `git branch -d ${name} 失败`);
+    }
+    return ok({ output: joinOutput(r), deleted: name, status: await getStatus() });
   })
 );
 

@@ -123,7 +123,7 @@ async function main() {
     "tools/list",
     JSON.stringify(names) ===
       JSON.stringify([
-        "git_blob", "git_branch_list", "git_checkout", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push",
+        "git_blob", "git_branch_delete", "git_branch_list", "git_checkout", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push",
         "git_stage", "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
       ]),
     names.join(",")
@@ -220,6 +220,44 @@ async function main() {
     !r.isError && r.payload?.status?.branch === "main",
     r.isError ? r.raw.content?.[0]?.text : ""
   );
+
+  // --- branch delete suite（删除本地分支：-d 默认 / BRANCH_UNMERGED / force）----
+  r = await call("git_branch_delete", { name: "branch-a" });
+  check(
+    "git_branch_delete merged branch",
+    !r.isError && String(r.payload?.output || "").includes("Deleted branch"),
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  r = await call("git_branch_list", {});
+  check("git_branch_delete removed from list", !r.payload?.locals?.some((b) => b.name === "branch-a"));
+  r = await call("git_branch_delete", { name: "no-such-branch" });
+  check("git_branch_delete missing branch errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+  r = await call("git_branch_delete", { name: "main" });
+  check("git_branch_delete current branch errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+  await g(["checkout", "-b", "unmerged-b"]);
+  await writeFile(path.join(repo, "un.txt"), "unmerged\n");
+  await g(["add", "un.txt"]);
+  const unMsg = path.join(repo, ".unmsg");
+  await writeFile(unMsg, "feat: unmerged commit");
+  await g(["commit", "--file=" + unMsg]);
+  await rm(unMsg);
+  await g(["checkout", "main"]);
+  r = await call("git_branch_delete", { name: "unmerged-b" });
+  check(
+    "git_branch_delete unmerged rejected with code",
+    r.isError && r.raw.structuredContent?.code === "BRANCH_UNMERGED",
+    JSON.stringify(r.raw.structuredContent)
+  );
+  r = await call("git_branch_list", {});
+  check("git_branch_delete unmerged still listed", r.payload?.locals?.some((b) => b.name === "unmerged-b"));
+  r = await call("git_branch_delete", { name: "unmerged-b", force: true });
+  check(
+    "git_branch_delete force unmerged ok",
+    !r.isError,
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  r = await call("git_branch_list", {});
+  check("git_branch_delete force removed from list", !r.payload?.locals?.some((b) => b.name === "unmerged-b"));
 
   // --- stash suite -----------------------------------------------------------
   await writeFile(path.join(repo, "hello.txt"), "line1\nline2\nstashed\n");
