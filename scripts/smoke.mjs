@@ -1,7 +1,7 @@
 // Smoke test: boots dist/server.mjs against a throwaway git repo and drives
 // the full MCP surface (handshake, tools/list, resources/read, all tools).
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,7 +123,7 @@ async function main() {
     "tools/list",
     JSON.stringify(names) ===
       JSON.stringify([
-        "git_blob", "git_branch_delete", "git_branch_list", "git_branch_merge", "git_checkout", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push",
+        "git_blob", "git_branch_delete", "git_branch_list", "git_branch_merge", "git_checkout", "git_commit", "git_diff", "git_diff_batch", "git_discard", "git_log", "git_pull", "git_push",
         "git_show", "git_stage", "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
       ]),
     names.join(",")
@@ -447,6 +447,42 @@ async function main() {
   // 还原：取消暂存并丢弃
   await call("git_unstage", { paths: ["wide.txt"] });
   await call("git_discard", { paths: ["wide.txt"] });
+
+  // --- git_diff_batch（批量 diff：AI 生成提交信息的收集路径）-------------------
+  await mkdir(path.join(repo, "资产"), { recursive: true });
+  await writeFile(path.join(repo, "资产", "场景.prefab"), "prefab v1\n");
+  await writeFile(path.join(repo, "batch.bin"), Buffer.from([1, 0, 2, 0, 255]));
+  await g(["add", "资产", "batch.bin"]);
+  const batchMsg = path.join(repo, ".commitmsg");
+  await writeFile(batchMsg, "batch fixture");
+  await g(["commit", "--file=" + batchMsg]);
+  await rm(batchMsg);
+  await g(["mv", "资产/场景.prefab", "资产/场景-改名.prefab"]);
+  // commit 后再改 binary 文件使其进入暂存区，批量 diff 才有二进制块可断言
+  await writeFile(path.join(repo, "batch.bin"), Buffer.from([9, 9, 9, 0, 8]));
+  await g(["add", "batch.bin"]);
+  r = await call("git_diff_batch", { paths: ["资产/场景-改名.prefab", "batch.bin", "没有.txt"], staged: true });
+  check(
+    "git_diff_batch order & rename chunk",
+    !r.isError &&
+      r.payload?.diffs?.length === 3 &&
+      r.payload?.diffs[0]?.path === "资产/场景-改名.prefab" &&
+      r.payload?.diffs[0]?.text?.includes("+++ b/资产/场景-改名.prefab") &&
+      r.payload?.diffs[0]?.text?.includes("prefab v1"),
+    JSON.stringify(r.payload?.diffs?.map((d) => [d.path, d.binary, d.text?.length]))
+  );
+  check("git_diff_batch binary flag", r.payload?.diffs?.[1]?.binary === true, "");
+  check("git_diff_batch missing placeholder", r.payload?.diffs?.[2]?.text?.includes("没有该文件的变更"), "");
+  // 工作区视图：未跟踪文件合成 diff，无变更文件占位
+  await writeFile(path.join(repo, "新文件.txt"), "untracked content\n");
+  r = await call("git_diff_batch", { paths: ["新文件.txt", "hello.txt"], staged: false });
+  check("git_diff_batch untracked synthesized", !r.isError && r.payload?.diffs?.[0]?.text?.includes("+untracked content"), "");
+  check("git_diff_batch unchanged placeholder", r.payload?.diffs?.[1]?.text?.includes("没有该文件的变更"), "");
+  // 还原：硬重置到 fixture 提交并清掉磁盘残留，后续「空暂存区提交报错」等断言依赖干净状态
+  await g(["reset", "--hard", "HEAD"]);
+  await rm(path.join(repo, "batch.bin"), { force: true });
+  await rm(path.join(repo, "新文件.txt"), { force: true });
+  await rm(path.join(repo, "资产"), { recursive: true, force: true });
 
   // --- git_blob（图片预览比对的数据源）----------------------------------------
   r = await call("git_blob", { path: "hello.txt", rev: "worktree" });

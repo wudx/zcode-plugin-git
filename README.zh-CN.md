@@ -88,6 +88,7 @@ scripts/
 | --- | --- |
 | `git_status` | 分支、ahead/behind、暂存/工作区/冲突文件列表、stash 数量 |
 | `git_diff` | 单文件 diff（`staged=true` 为暂存区 vs HEAD；未跟踪文件合成全新增 diff；`scope=function`/`file` 显示更大范围） |
+| `git_diff_batch` | 一次调用返回多个文件的 diff（一次 git status + 一次整体 diff 拆块，替代逐文件拉取；结果顺序与 paths 一致） |
 | `git_stage` | git add |
 | `git_unstage` | git restore --staged（首次提交前等价 git rm --cached） |
 | `git_discard` | 撤销工作区修改 / 删除未跟踪文件（危险） |

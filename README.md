@@ -88,6 +88,7 @@ scripts/
 | --- | --- |
 | `git_status` | Branch, ahead/behind, staged/worktree/conflict file lists, stash count |
 | `git_diff` | Single-file diff (`staged=true` for index vs HEAD; untracked files become an all-added diff; `scope=function`/`file` for wider context) |
+| `git_diff_batch` | Diffs for many paths in one call (one `git status` + one bulk diff instead of per-file spawns; order matches `paths`) |
 | `git_stage` | `git add` |
 | `git_unstage` | `git restore --staged` (equals `git rm --cached` before the first commit) |
 | `git_discard` | Discard worktree changes / delete untracked files (dangerous) |

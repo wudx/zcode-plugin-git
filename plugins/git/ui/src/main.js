@@ -24,6 +24,10 @@ const AI_DIFF_BUDGET = 80000;
 const AI_FILE_CAP = 20000;
 // 压缩产物判定：diff 足够长且平均行长爆表（dist 压缩 HTML/JS 一行上万字符），对生成无信息量
 const AI_MINIFIED_AVG_LINE = 500;
+// 源码类扩展名优先进入 diff 预算：大资源提交里 meta/png 的重命名 diff 会按清单顺序
+// 先吃光预算，核心源码只剩文件名（模型看不到改动内容）。清单本身保持原顺序，
+// 只有进预算的遍历顺序分层：源码在前，其余在后，同层内按清单原序。
+const AI_CODE_EXT_RE = /\.(ts|tsx|js|jsx|mjs|cjs|py|xml|json|md|css|scss|less|html|htm|yml|yaml|toml|ini|lua|java|kt|swift|go|rs|c|h|cc|cpp|hpp|cs|sh|bat|ps1|vue|gd)$/i;
 
 // ---------------------------------------------------------------------------
 // top-level events
@@ -241,11 +245,19 @@ async function generateCommitMessage() {
     }
     // 变更文件清单随 prompt 恒发：diff 被截断/省略时模型仍能看到改动全貌
     const manifest = staged.map((e) => `${e.code} ${e.path}`);
+    // 一次批量拉齐全部 diff：逐文件各调一次工具时，服务端每次都要重跑 git status
+    // （N 个文件 ≈ 5N 个 git 子进程 + N 次 MCP 往返），大暂存列表会慢到分钟级
+    const batch = (await callTool("git_diff_batch", { paths: staged.map((e) => e.path), staged: true }))?.diffs || [];
+    const byPath = new Map(batch.map((d) => [d.path, d]));
     const parts = [];
     let total = 0;
-    for (const e of staged) {
-      const d = await callTool("git_diff", { path: e.path, staged: true });
-      let text = d?.binary ? `Binary file changed: ${e.path}` : d?.text || "";
+    // 源码优先进预算：先遍历源码类文件，非源码再补位，避免被海量 meta/png 挤占
+    const order = staged
+      .map((e, i) => ({ e, i }))
+      .sort((a, b) => Number(AI_CODE_EXT_RE.test(b.e.path)) - Number(AI_CODE_EXT_RE.test(a.e.path)) || a.i - b.i);
+    for (const { e } of order) {
+      const d = byPath.get(e.path);
+      let text = !d ? "" : d.binary ? `Binary file changed: ${e.path}` : d.text || "";
       // 压缩产物（构建输出）只留清单标注，diff 全文跳过，把预算让给源码
       if (!d?.binary && text.length > 2000 && text.length / (text.split("\n").length) > AI_MINIFIED_AVG_LINE) {
         manifest.push(`  (${e.path}: diff omitted — minified build output)`);

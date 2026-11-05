@@ -327,6 +327,73 @@ function truncate(text) {
   return text.slice(0, MAX_DIFF_BYTES) + "\n…（diff 过大，已截断）";
 }
 
+// git 对含特殊字符的路径用 C 风格引号包裹（core.quotepath=false 已让非 ASCII 保持裸露，
+// 这里兜底处理引号内 \" \\ 等转义与八进制字节转义）
+function unquoteCPath(p) {
+  if (!p.startsWith('"') || !p.endsWith('"') || p.length < 2) return p;
+  const inner = p.slice(1, -1);
+  try {
+    return JSON.parse(`"${inner}"`);
+  } catch {
+    // 含 \ooo 八进制转义时 JSON.parse 会失败：按字节重组为 UTF-8
+    const bytes = [];
+    for (let i = 0; i < inner.length; ) {
+      if (inner[i] === "\\" && /^\d{3}/.test(inner.slice(i + 1))) {
+        bytes.push(parseInt(inner.slice(i + 1, i + 4), 8));
+        i += 4;
+      } else if (inner[i] === "\\" && i + 1 < inner.length) {
+        bytes.push(inner.charCodeAt(i + 1));
+        i += 2;
+      } else {
+        bytes.push(inner.charCodeAt(i) & 0xff);
+        i += 1;
+      }
+    }
+    return Buffer.from(bytes).toString("utf8");
+  }
+}
+
+// 把一次整体 diff 的输出按「diff --git」块拆开，归属到文件路径。
+// 正文行都以 +/-'/' 开头，只有真正的块头才会以 diff --git 起始，逐行扫描不会误切。
+// 归属键取 +++ b/ 路径（删除文件时为 /dev/null，回退用 --- a/ 路径；重命名即新路径）。
+function splitDiffByFile(text) {
+  const map = new Map(); // path -> { binary, text }
+  if (!text) return map;
+  const chunks = [];
+  let cur = null;
+  for (const line of text.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      if (cur) chunks.push(cur);
+      cur = [];
+    }
+    if (cur) cur.push(line);
+  }
+  if (cur) chunks.push(cur);
+  for (const lines of chunks) {
+    let add;
+    let del;
+    let binary = false;
+    let headerPath = null;
+    let renameTo;
+    for (const l of lines) {
+      if (l.startsWith("diff --git ")) {
+        // 二进制块的修改（非新增/删除）没有 ---/+++ 行，路径只能从块头取
+        const m = /^diff --git a\/(.*) b\/(.+)$/.exec(l);
+        if (m && m[1] === m[2]) headerPath = m[1];
+      } else if (l.startsWith("rename to ")) {
+        renameTo = unquoteCPath(l.slice(10));
+      } else if (add === undefined && l.startsWith("+++ b/")) add = unquoteCPath(l.slice(6));
+      else if (add === undefined && l === "+++ /dev/null") add = null;
+      else if (del === undefined && l.startsWith("--- a/")) del = unquoteCPath(l.slice(5));
+      else if (del === undefined && l === "--- /dev/null") del = null;
+      else if (l.startsWith("Binary files ") || l === "GIT binary patch") binary = true;
+    }
+    const p = add ?? del ?? renameTo ?? headerPath;
+    if (p) map.set(p, { binary, text: truncate(lines.join("\n")) });
+  }
+  return map;
+}
+
 // ---------------------------------------------------------------------------
 // tools
 // ---------------------------------------------------------------------------
@@ -371,6 +438,52 @@ server.registerTool(
       return ok({ path: safe, staged, binary: false, text: `（${staged ? "暂存区" : "工作区"}中没有该文件的变更）` });
     }
     return ok(await fileDiff(top, entry, staged, context, scope));
+  })
+);
+
+server.registerTool(
+  "git_diff_batch",
+  {
+    title: "批量查看文件 diff",
+    description:
+      "一次返回多个文件的统一 diff（staged=true 时对比 HEAD 与暂存区，默认 false）。与逐个调用 git_diff 等价，但只做一次工具调用、一次 git status，遍历大量变更文件（如 AI 生成提交信息前收集 diff）时开销低一个数量级。返回 JSON：{ diffs: [{ path, staged, binary, text }] }，diffs 顺序与入参 paths 一致；仓库中没有变更的文件 text 为提示文案，diff 全文超过 512KB 的文件会被截断。",
+    inputSchema: {
+      paths: z.array(z.string().min(1)).min(1).describe("仓库内相对路径列表"),
+      staged: z.boolean().optional().describe("是否查看已暂存的 diff，默认 false"),
+      context: z.number().int().min(0).max(50).optional().describe("上下文行数，默认 10"),
+    },
+    ...uiMeta,
+  },
+  withTool(async (top, { paths: list, staged = false, context }) => {
+    const safe = list.map(assertSafePath);
+    const st = await getStatus();
+    const all = [...st.staged, ...st.unstaged];
+    const noChange = `（${staged ? "暂存区" : "工作区"}中没有该文件的变更）`;
+    const diffs = safe.map((p) => ({ path: p, staged, binary: false, text: noChange }));
+    // 未跟踪文件的合成 diff 只在工作区视图出现：逐个走 fileDiff（读文件，无 git 子进程）
+    const bulk = [];
+    for (let i = 0; i < safe.length; i++) {
+      const entry = all.find((e) => e.path === safe[i] || e.origPath === safe[i]);
+      if (!entry) continue;
+      if (!staged && entry.code === "?" && !entry.unmerged) {
+        diffs[i] = await fileDiff(top, entry, staged, context, "line");
+        continue;
+      }
+      bulk.push({ i, p: safe[i] });
+    }
+    if (bulk.length) {
+      // 其余文件合并成一次 git diff（一次 numstat/上下文开销），再按块拆回各文件
+      const r = await runGit(
+        [...QP, "diff", ...(staged ? ["--cached"] : []), "--no-color", "-M", ...diffContextArgs(context, "line"), "--", ...bulk.map((x) => x.p)],
+        { cwd: top }
+      );
+      const byPath = splitDiffByFile(r.stdout);
+      for (const { i, p } of bulk) {
+        const c = byPath.get(p);
+        diffs[i] = c ? { path: p, staged, binary: c.binary, text: c.text } : { path: p, staged, binary: false, text: "" };
+      }
+    }
+    return ok({ diffs });
   })
 );
 

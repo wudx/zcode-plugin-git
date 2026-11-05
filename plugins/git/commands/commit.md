@@ -8,7 +8,7 @@ description: 分析变更并生成提交信息，确认后提交
 2. 如果暂存区为空：
    - 若工作区也没有任何修改，告知用户没有可提交的变更，结束。
    - 否则询问用户是否把全部修改加入暂存区（列出文件），用户确认后再调用 `git_stage`；用户拒绝则结束。
-3. 对暂存区的每个文件调用 `git_diff`（`staged: true`）获取暂存 diff。如果 diff 总量过大，优先看文件名与状态，取前若干个文件的 diff。
+3. 对暂存区的全部文件调用一次 `git_diff_batch`（`staged: true`，paths 传所有暂存文件）获取暂存 diff。如果 diff 总量过大，优先看文件名与状态，取前若干个文件的 diff。
 4. 基于暂存内容生成提交信息：
    - 符合 Conventional Commits 风格：`type(scope): 摘要`，摘要不超过 72 字符。
    - 常用 type：feat / fix / docs / style / refactor / perf / test / chore。

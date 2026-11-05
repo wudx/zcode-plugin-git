@@ -240,6 +240,22 @@ function toolResult(name, args) {
       const binary = args.path.endsWith(".png");
       return { content: [{ type: "text", text: JSON.stringify({ path: args.path, staged: !!args.staged, binary, text }) }] };
     }
+    case "git_diff_batch": {
+      const staged = !!args.staged;
+      const suffix = staged ? "staged" : "work";
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            diffs: (args.paths ?? []).map((p) => {
+              const text = DIFFS[`${p}:${suffix}`];
+              const binary = p.endsWith(".png") && text != null;
+              return { path: p, staged, binary, text: text ?? `（${staged ? "暂存区" : "工作区"}中没有该文件的变更）` };
+            }),
+          }),
+        }],
+      };
+    }
     case "git_stage": {
       const moved = args.paths ?? [];
       state = JSON.parse(JSON.stringify(state));
