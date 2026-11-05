@@ -47,7 +47,8 @@ export function confirmUI(target, { question, yesLabel, cancelLabel, onYes, onCa
   }
   const parts = [q, yes];
   if (cancelLabel != null) {
-    const no = el("button", null, cancelLabel);
+    // 不加类会落到浏览器原生按钮样式，与面板风格脱节
+    const no = el("button", "btn", cancelLabel);
     no.addEventListener("click", (e) => {
       e.stopPropagation();
       onCancel();
