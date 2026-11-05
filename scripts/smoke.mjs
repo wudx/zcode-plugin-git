@@ -124,7 +124,7 @@ async function main() {
     JSON.stringify(names) ===
       JSON.stringify([
         "git_blob", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push", "git_stage",
-        "git_stash", "git_stash_apply", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
+        "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
       ]),
     names.join(",")
   );

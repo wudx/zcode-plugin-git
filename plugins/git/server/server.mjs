@@ -581,6 +581,23 @@ server.registerTool(
 );
 
 server.registerTool(
+  "git_stash_drop",
+  {
+    title: "删除指定存储",
+    description: "删除指定的 stash 条目（git stash drop），不影响工作区。ref 形如 stash@{0}，可先用 git_stash_list 查看。",
+    inputSchema: {
+      ref: z.string().regex(/^stash@\{\d+\}$/).describe("存储引用，如 stash@{0}"),
+    },
+    ...uiMeta,
+  },
+  withTool(async (top, { ref }) => {
+    const r = await runGit(["stash", "drop", ref], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, `git stash drop ${ref} 失败`);
+    return ok({ output: joinOutput(r), status: await getStatus() });
+  })
+);
+
+server.registerTool(
   "git_stash_list",
   {
     title: "查看存储列表",

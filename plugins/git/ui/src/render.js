@@ -14,8 +14,6 @@ import { attachMinimap } from "./minimap.js";
 import { renderStashMenu } from "./stash.js";
 import { runAction, updateCommitBar } from "./actions.js";
 
-const BADGE_MAX = 99; // stash 角标数字上限，超出显示 99+
-
 export function render() {
   if (!status) return;
   const br = $("branch");
@@ -32,12 +30,7 @@ export function render() {
     ab.hidden = false;
   } else ab.hidden = true;
 
-  // stash 角标
-  const stashes = status.stashes || 0;
-  const badge = $("stash-badge");
-  badge.hidden = stashes === 0;
-  badge.textContent = stashes > BADGE_MAX ? "99+" : String(stashes);
-  $("stash-btn").title = stashes ? `${t.stashMenu}（${stashes}）` : t.stashMenu;
+  $("stash-btn").title = t.stashMenu;
 
   const conflicts = status.conflicts || [];
   $("conflict-box").hidden = conflicts.length === 0;

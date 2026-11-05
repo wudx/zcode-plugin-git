@@ -6,8 +6,10 @@ import { t } from "./i18n.js";
 import { ICONS } from "./icons.js";
 import { callTool } from "./api.js";
 import { status, busy, stashOpen, stashState, setStashOpen, setStashState } from "./state.js";
-import { $ } from "./dom.js";
+import { $, confirmUI } from "./dom.js";
 import { runAction, toast } from "./actions.js";
+
+let dropConfirmRef = null; // 正在二次确认删除的 stash ref
 
 function menuItem(icon, label, disabled, fn) {
   const b = document.createElement("button");
@@ -71,6 +73,24 @@ export function renderStashMenu() {
     for (const entry of stashState.entries) {
       const rowE = document.createElement("div");
       rowE.className = "menu-entry";
+      // 删除为不可恢复操作：行内二次确认（与文件行撤销同一模式）
+      if (dropConfirmRef === entry.ref) {
+        confirmUI(rowE, {
+          question: t.confirmDelete,
+          yesLabel: t.confirmYes,
+          cancelLabel: t.cancel,
+          onYes: () => {
+            dropConfirmRef = null;
+            runGitAction("git_stash_drop", { ref: entry.ref });
+          },
+          onCancel: () => {
+            dropConfirmRef = null;
+            renderStashMenu();
+          },
+        });
+        list.appendChild(rowE);
+        continue;
+      }
       const msg = document.createElement("span");
       msg.className = "menu-entry-msg";
       msg.textContent = entry.message || entry.ref;
@@ -84,7 +104,17 @@ export function renderStashMenu() {
         e.stopPropagation();
         runGitAction("git_stash_apply", { ref: entry.ref });
       });
-      rowE.append(msg, apply);
+      const drop = document.createElement("button");
+      drop.className = "btn icon";
+      drop.innerHTML = ICONS.trash;
+      drop.title = t.stashDrop;
+      drop.disabled = busy;
+      drop.addEventListener("click", (e) => {
+        e.stopPropagation();
+        dropConfirmRef = entry.ref;
+        renderStashMenu();
+      });
+      rowE.append(msg, apply, drop);
       list.appendChild(rowE);
     }
     menu.appendChild(list);
@@ -92,6 +122,7 @@ export function renderStashMenu() {
 }
 
 export async function loadStashList() {
+  dropConfirmRef = null; // 列表重新拉取，挂起的确认作废
   setStashState({ phase: "loading", entries: [] });
   renderStashMenu();
   try {
@@ -108,6 +139,7 @@ export async function loadStashList() {
 export function closeStash() {
   setStashOpen(false);
   setStashState(null);
+  dropConfirmRef = null;
   renderStashMenu();
 }
 

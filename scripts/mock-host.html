@@ -269,6 +269,10 @@ function toolResult(name, args) {
       state = { ...state, unstaged: JSON.parse(JSON.stringify(SCENARIOS.rich.unstaged)) };
       return { content: [{ type: "text", text: JSON.stringify({ output: "On " + state.branch + ": 实验性 diff 并排视图", status: state }) }] };
     }
+    case "git_stash_drop": {
+      state = { ...state, stashes: Math.max(0, (state.stashes ?? 0) - 1) };
+      return { content: [{ type: "text", text: JSON.stringify({ output: `Dropped ${args.ref}`, status: state }) }] };
+    }
     case "git_pull":
       return { content: [{ type: "text", text: JSON.stringify({ output: "Already up to date.", status: state }) }] };
     case "git_push": {
