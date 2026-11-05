@@ -22,6 +22,8 @@ export let stagedCollapsed = lsGet("zcode-git.stagedCollapsed") === "1";
 export let worktreeCollapsed = lsGet("zcode-git.worktreeCollapsed") === "1";
 export let stashOpen = false;
 export let stashState = null; // null | { phase: 'loading'|'ready'|'error', entries, error }
+export let branchOpen = false;
+export let branchState = null; // null | { phase: 'loading'|'ready'|'error', locals, remotes, error }
 
 export function setStatus(fresh) {
   status = fresh;
@@ -38,6 +40,8 @@ export function setPromptOpen(v) {
 }
 export function setStashOpen(v) { stashOpen = v; }
 export function setStashState(v) { stashState = v; }
+export function setBranchOpen(v) { branchOpen = v; }
+export function setBranchState(v) { branchState = v; }
 export function setStagedCollapsed(v) {
   stagedCollapsed = v;
   lsSet("zcode-git.stagedCollapsed", v ? "1" : "0");

@@ -12,13 +12,14 @@ import { diffEl, loadImages } from "./diffbox.js";
 import { IMAGE_RE } from "./diffview.js";
 import { attachMinimap } from "./minimap.js";
 import { renderStashMenu } from "./stash.js";
+import { renderBranchMenu } from "./branches.js";
 import { runAction, updateCommitBar } from "./actions.js";
 
 export function render() {
   if (!status) return;
   const br = $("branch");
   br.textContent = status.detached ? "(detached)" : status.branch || "…";
-  br.title = status.repo || "";
+  br.title = t.branchMenu;
   const ab = $("ahead-behind");
   if (status.upstream && (status.ahead || status.behind)) {
     // 领先/落后分色：绿=待推送，黄=待拉取
@@ -106,6 +107,7 @@ export function render() {
   }
   updateCommitBar(staged.length);
   renderStashMenu();
+  renderBranchMenu();
 }
 
 function mkAllButton(box, icon, label, paths, tool, needConfirm = false) {

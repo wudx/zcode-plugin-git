@@ -123,8 +123,8 @@ async function main() {
     "tools/list",
     JSON.stringify(names) ===
       JSON.stringify([
-        "git_blob", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push", "git_stage",
-        "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
+        "git_blob", "git_branch_list", "git_checkout", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push",
+        "git_stage", "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
       ]),
     names.join(",")
   );
@@ -183,6 +183,43 @@ async function main() {
   // git_log
   r = await call("git_log", { limit: 5 });
   check("git_log", !r.isError && r.payload?.commits?.length === 2 && r.payload?.commits?.[0]?.subject === "feat: smoke commit");
+
+  // --- branch suite（本地分支列表与切换；feat-x 名字留给后面的 push 兜底套件）---
+  await g(["branch", "branch-a"]);
+  r = await call("git_branch_list", {});
+  check(
+    "git_branch_list locals",
+    !r.isError && r.payload?.locals?.length === 2
+      && r.payload.locals.some((b) => b.name === "main" && b.current === true)
+      && r.payload.locals.some((b) => b.name === "branch-a" && b.current === false)
+      && r.payload.locals.every((b) => typeof b.sha === "string" && b.sha.length >= 7)
+      && r.payload?.remotes?.length === 0,
+    JSON.stringify(r.payload)
+  );
+  r = await call("git_checkout", { branch: "branch-a" });
+  check(
+    "git_checkout branch-a",
+    !r.isError && r.payload?.status?.branch === "branch-a",
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  r = await call("git_checkout", { branch: "no-such-branch" });
+  check("git_checkout missing branch errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+  r = await call("git_checkout", { branch: "-evil" });
+  check("git_checkout rejects option-like branch", r.isError);
+  r = await call("git_checkout", { branch: "from-main", create: true });
+  check(
+    "git_checkout create from HEAD",
+    !r.isError && r.payload?.status?.branch === "from-main",
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  r = await call("git_checkout", { branch: "from-main", create: true });
+  check("git_checkout create existing errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+  r = await call("git_checkout", { branch: "main" });
+  check(
+    "git_checkout back to main",
+    !r.isError && r.payload?.status?.branch === "main",
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
 
   // --- stash suite -----------------------------------------------------------
   await writeFile(path.join(repo, "hello.txt"), "line1\nline2\nstashed\n");
@@ -260,6 +297,21 @@ async function main() {
   );
   const remoteFbLog = await g(["--git-dir", remote, "log", "--oneline", "feat-x"]);
   check("git_push fallback commit on remote", remoteFbLog.includes("feat: fallback push"), remoteFbLog);
+  await g(["checkout", "main"]);
+
+  // --- branch suite（远程分支）：列表带 origin/*，可从远程建跟踪本地分支 --------
+  r = await call("git_branch_list", {});
+  check(
+    "git_branch_list remotes",
+    !r.isError && r.payload?.remotes?.some((b) => b.name === "origin/feat-x" && b.current === false),
+    JSON.stringify(r.payload?.remotes)
+  );
+  r = await call("git_checkout", { branch: "feat-y", create: true, startPoint: "origin/feat-x" });
+  check(
+    "git_checkout from remote start point tracks upstream",
+    !r.isError && r.payload?.status?.branch === "feat-y" && r.payload?.status?.upstream === "origin/feat-x",
+    r.isError ? r.raw.content?.[0]?.text : JSON.stringify(r.payload?.status?.upstream)
+  );
   await g(["checkout", "main"]);
 
   // --- git_diff scope（上下文范围：line/function/file）------------------------

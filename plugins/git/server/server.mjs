@@ -1,5 +1,5 @@
 // Git workbench MCP server for ZCode.
-// Tools: status / diff / stage / unstage / discard / commit / log / pull / push / stash.
+// Tools: status / diff / stage / unstage / discard / commit / log / pull / push / branch / checkout / stash.
 // Also serves the panel UI as an MCP Apps resource (ui://git/panel.html).
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -528,6 +528,66 @@ server.registerTool(
     }
     if (r.code !== 0) throw gitErr(r, "git push 失败");
     return ok({ output: joinOutput(r), status: await getStatus() });
+  })
+);
+
+server.registerTool(
+  "git_branch_list",
+  {
+    title: "查看分支列表",
+    description:
+      "查看分支列表，返回 locals 与 remotes 两个数组（按最近提交排序）。本地分支条目含 current（是否当前分支）、sha/subject（最新提交）、ahead/behind（相对上游，无上游为 0）；远程分支条目 name 为 origin/xxx 形式，current/ahead/behind 恒为 false/0。origin/HEAD 等符号引用已过滤。切换分支用 git_checkout。",
+    inputSchema: {},
+    ...uiMeta,
+  },
+  withTool(async (top) => {
+    const fmt = "--format=%(HEAD)%09%(refname:short)%09%(objectname:short)%09%(contents:subject)%09%(upstream:track)";
+    const parse = (stdout) =>
+      stdout
+        .split("\n")
+        .filter((l) => l.trim() !== "")
+        .map((l) => {
+          const [head, name, sha, subject, track = ""] = l.split("\t");
+          const ahead = track.match(/ahead (\d+)/);
+          const behind = track.match(/behind (\d+)/);
+          return {
+            name,
+            current: head === "*",
+            sha,
+            subject: subject || "",
+            ahead: ahead ? Number(ahead[1]) : 0,
+            behind: behind ? Number(behind[1]) : 0,
+          };
+        });
+    const local = await runGit([...QP, "for-each-ref", "refs/heads", "--sort=-committerdate", fmt], { cwd: top });
+    const remote = await runGit([...QP, "for-each-ref", "refs/remotes", "--sort=-committerdate", fmt], { cwd: top });
+    if (local.code !== 0) throw gitErr(local, "git branch list 失败");
+    if (remote.code !== 0) throw gitErr(remote, "git branch list 失败");
+    return ok({
+      locals: parse(local.stdout),
+      remotes: parse(remote.stdout).filter((e) => !/\/HEAD$/.test(e.name)),
+    });
+  })
+);
+
+server.registerTool(
+  "git_checkout",
+  {
+    title: "切换分支",
+    description:
+      "切换到指定本地分支（git checkout <branch>）。create=true 时新建该分支并切换（git checkout -b），startPoint 可指定起点（如 origin/foo），默认当前 HEAD。工作区有未提交修改时 git 会尝试携带过去；会覆盖修改时拒绝执行并报错，报错信息为 git 原始输出。可先用 git_branch_list 查看分支。",
+    inputSchema: {
+      branch: z.string().regex(/^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/).describe("本地分支名，如 feat-x"),
+      create: z.boolean().optional().describe("为 true 时新建该分支并切换（git checkout -b）"),
+      startPoint: z.string().regex(/^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/).optional().describe("新建分支的起点（本地分支名或 origin/xxx），默认当前 HEAD"),
+    },
+    ...uiMeta,
+  },
+  withTool(async (top, { branch, create = false, startPoint }) => {
+    const args = create ? ["checkout", "-b", branch, ...(startPoint ? [startPoint] : [])] : ["checkout", branch];
+    const r = await runGit(args, { cwd: top });
+    if (r.code !== 0) throw gitErr(r, `git checkout ${branch} 失败`);
+    return ok({ output: joinOutput(r), branch, status: await getStatus() });
   })
 );
 

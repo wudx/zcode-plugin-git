@@ -4,14 +4,15 @@ import { ICONS } from "./icons.js";
 import { lsGet, lsSet } from "./storage.js";
 import {
   status, busy, treeMode, customPrompt, promptOpen, lastStatusJson,
-  stashOpen, stagedCollapsed, worktreeCollapsed,
-  setStashOpen, setTreeMode, setCustomPrompt, setPromptOpen,
+  stashOpen, branchOpen, stagedCollapsed, worktreeCollapsed,
+  setStashOpen, setBranchOpen, setTreeMode, setCustomPrompt, setPromptOpen,
   setStagedCollapsed, setWorktreeCollapsed,
 } from "./state.js";
 import { app, callTool } from "./api.js";
 import { $ } from "./dom.js";
 import { render } from "./render.js";
 import { loadStashList, closeStash, runGitAction } from "./stash.js";
+import { loadBranchList, closeBranchMenu } from "./branches.js";
 import { applyStatus, refresh, runAction, toast, updateCommitBar, showFatal } from "./actions.js";
 
 const POLL_MS = 3000;
@@ -63,6 +64,7 @@ $("push-btn").addEventListener("click", () => runGitAction("git_push", {}));
 
 $("stash-btn").addEventListener("click", (e) => {
   e.stopPropagation();
+  if (branchOpen) closeBranchMenu();
   if (stashOpen) {
     closeStash();
   } else {
@@ -71,14 +73,32 @@ $("stash-btn").addEventListener("click", (e) => {
   }
 });
 
+// 分支菜单：点击 header 分支名（或回车/空格）开关；两个菜单互斥
+function toggleBranchMenu() {
+  if (branchOpen) {
+    closeBranchMenu();
+    return;
+  }
+  if (stashOpen) closeStash();
+  setBranchOpen(true);
+  loadBranchList();
+}
+$("branch").addEventListener("click", toggleBranchMenu);
+$("branch").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  e.preventDefault();
+  toggleBranchMenu();
+});
+
 // 菜单打开时：点击菜单外或按 Esc 关闭。
 document.addEventListener("pointerdown", (e) => {
-  if (!stashOpen) return;
-  if ($("stash-menu").contains(e.target) || $("stash-btn").contains(e.target)) return;
-  closeStash();
+  if (stashOpen && !$("stash-menu").contains(e.target) && !$("stash-btn").contains(e.target)) closeStash();
+  if (branchOpen && !$("branch-menu").contains(e.target) && !$("branch").contains(e.target)) closeBranchMenu();
 });
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && stashOpen) closeStash();
+  if (e.key !== "Escape") return;
+  if (stashOpen) closeStash();
+  if (branchOpen) closeBranchMenu();
 });
 
 $("commit-btn").addEventListener("click", () => {

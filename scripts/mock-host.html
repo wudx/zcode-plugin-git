@@ -211,6 +211,18 @@ const STASHES = [
   { ref: "stash@{1}", message: "On main: 实验性 diff 并排视图" },
 ];
 
+const BRANCHES = {
+  locals: [
+    { name: "feat/git-panel", current: true, sha: "9f01c3a", subject: "feat(git): add workbench panel", ahead: 2, behind: 1 },
+    { name: "main", current: false, sha: "2b77e10", subject: "chore: bump deps", ahead: 0, behind: 0 },
+    { name: "feat/branch-menu", current: false, sha: "e4c5d21", subject: "feat(git): 面板支持切换分支", ahead: 0, behind: 3 },
+  ],
+  remotes: [
+    { name: "origin/main", current: false, sha: "2b77e10", subject: "chore: bump deps", ahead: 0, behind: 0 },
+    { name: "origin/feat/dark-theme", current: false, sha: "77aa1bc", subject: "feat(ui): dark theme tokens", ahead: 0, behind: 0 },
+  ],
+};
+
 function toolResult(name, args) {
   log("tool:", name, args);
   if (scenario === "norepo" && name === "git_status") {
@@ -278,6 +290,13 @@ function toolResult(name, args) {
     case "git_push": {
       state = { ...state, ahead: 0 };
       return { content: [{ type: "text", text: JSON.stringify({ output: "To E:/demo-project\n   9f01c3a..2b77e10  " + state.branch + " -> " + state.branch, status: state }) }] };
+    }
+    case "git_branch_list":
+      return { content: [{ type: "text", text: JSON.stringify(BRANCHES) }] };
+    case "git_checkout": {
+      state = { ...state, branch: args.branch, detached: false };
+      const verb = args.create ? "Switched to a new branch" : "Switched to branch";
+      return { content: [{ type: "text", text: JSON.stringify({ output: `${verb} '${args.branch}'`, branch: args.branch, status: state }) }] };
     }
     case "git_blob": {
       // 生成旧/新两张占位图，验证图片比对视图

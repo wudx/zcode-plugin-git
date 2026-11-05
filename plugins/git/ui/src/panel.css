@@ -96,8 +96,8 @@ body {
   font-size: 11px;
   flex: none;
 }
-#ahead-behind .ab-ahead { color: var(--git-add); }
-#ahead-behind .ab-behind { color: var(--git-mod); }
+.ab-ahead { color: var(--git-add); }
+.ab-behind { color: var(--git-mod); }
 #header .spacer { flex: 1; }
 
 /* buttons */
@@ -398,11 +398,11 @@ body {
 }
 .toast-x:hover { opacity: 1; }
 
-/* stash dropdown menu */
-#stash-menu {
+/* header 下拉菜单（stash / branch 共用容器样式，锚点各自定位） */
+#stash-menu,
+#branch-menu {
   position: absolute;
   top: calc(100% + 4px);
-  right: 10px;
   z-index: 30;
   min-width: 250px;
   max-width: calc(100% - 20px);
@@ -415,7 +415,11 @@ body {
   flex-direction: column;
   gap: 1px;
 }
-#stash-menu[hidden] { display: none; }
+#stash-menu { right: 10px; }
+#branch-menu { left: 10px; }
+/* display 会覆盖 hidden 属性，必须显式收回（空浮层会拦截点击） */
+#stash-menu[hidden],
+#branch-menu[hidden] { display: none; }
 .menu-item {
   display: inline-flex;
   align-items: center;
@@ -449,6 +453,50 @@ body {
   font-size: 11.5px;
 }
 #stash-btn { margin-right: 3px; }
+
+/* branch menu：点击 header 分支名打开 */
+#branch {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 3px;
+  margin: -2px -3px; /* 扩大命中区但不改变布局 */
+}
+#branch:hover { color: var(--git-accent); }
+#branch:focus-visible { outline: 1px solid var(--git-accent); outline-offset: 1px; }
+#branch::after {
+  content: "▾";
+  font-size: 9px;
+  opacity: 0.6;
+  flex: none;
+}
+#branch-menu .menu-entries { max-height: 150px; }
+.branch-item { flex-direction: column; align-items: stretch; gap: 1px; padding: 4px 8px; }
+.branch-name { display: flex; align-items: center; gap: 5px; font-weight: 600; }
+.branch-check { display: inline-flex; line-height: 0; }
+.branch-name-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.branch-track { margin-left: auto; display: inline-flex; gap: 3px; font-size: 10.5px; font-weight: 400; }
+.branch-sub {
+  font-size: 11px;
+  color: var(--git-fg-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.branch-new { display: flex; gap: 4px; padding: 2px; }
+.branch-new-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--git-border);
+  background: var(--git-bg);
+  color: var(--git-fg);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.branch-new-input:focus { outline: none; border-color: var(--git-accent); }
+.branch-new-input:disabled { opacity: 0.45; }
+.branch-new-btn { flex: none; }
 
 /* tree view */
 .tree { display: flex; flex-direction: column; gap: 1px; }

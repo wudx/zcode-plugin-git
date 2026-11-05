@@ -1,10 +1,10 @@
 {
   "name": "git",
-  "version": "0.5.0",
-  "description": "Git workbench side panel: review staged and working-tree changes (list or tree view, unified or side-by-side diff), stage/unstage/discard files, pull, push, stash, preview modified images side-by-side (old vs new), and generate AI commit messages with a custom prompt.",
+  "version": "0.6.0",
+  "description": "Git workbench side panel: review staged and working-tree changes (list or tree view, unified or side-by-side diff), stage/unstage/discard files, switch branches (local, remote or newly created), pull, push, stash, preview modified images side-by-side (old vs new), and generate AI commit messages with a custom prompt.",
   "description_i18n": {
-    "en": "Git workbench side panel: review staged and working-tree changes with list/tree views and unified/side-by-side diffs, stage/unstage/discard files, pull and push, stash (pop/apply), write and run commits, and generate AI commit messages with an optional custom prompt.",
-    "zh-CN": "Git 工作台侧栏面板：以列表/树结构查看暂存区与工作区修改（统一/并排 diff），支持暂存、取消暂存、撤销、全部暂存/取消，图片文件旧版/新版并排预览比对，拉取与推送远程更新，存储/恢复/应用 stash，一键提交，并可附加自定义提示词用 AI 生成提交信息；面板自动跟踪外部文件改动。"
+    "en": "Git workbench side panel: review staged and working-tree changes with list/tree views and unified/side-by-side diffs, stage/unstage/discard files, switch branches (local, remote-tracked or newly created), pull and push, stash (pop/apply), write and run commits, and generate AI commit messages with an optional custom prompt.",
+    "zh-CN": "Git 工作台侧栏面板：以列表/树结构查看暂存区与工作区修改（统一/并排 diff），支持暂存、取消暂存、撤销、全部暂存/取消，切换分支（本地/远程建跟踪/新建），图片文件旧版/新版并排预览比对，拉取与推送远程更新，存储/恢复/应用 stash，一键提交，并可附加自定义提示词用 AI 生成提交信息；面板自动跟踪外部文件改动。"
   },
   "author": {
     "name": "dsp"
