@@ -558,7 +558,7 @@ server.registerTool(
   {
     title: "查看分支列表",
     description:
-      "查看分支列表，返回 locals 与 remotes 两个数组（按最近提交排序）。本地分支条目含 current（是否当前分支）、sha/subject（最新提交）、ahead/behind（相对上游，无上游为 0）；远程分支条目 name 为 origin/xxx 形式，current/ahead/behind 恒为 false/0。origin/HEAD 等符号引用已过滤。切换分支用 git_checkout，删除本地分支用 git_branch_delete。",
+      "查看分支列表，返回 locals 与 remotes 两个数组（按最近提交排序）。本地分支条目含 current（是否当前分支）、sha/subject（最新提交）、ahead/behind（相对上游，无上游为 0）；远程分支条目 name 为 origin/xxx 形式，current/ahead/behind 恒为 false/0。origin/HEAD 等符号引用已过滤。切换分支用 git_checkout，删除本地分支用 git_branch_delete，合并进当前分支用 git_branch_merge。",
     inputSchema: {},
     ...uiMeta,
   },
@@ -635,6 +635,24 @@ server.registerTool(
       throw gitErr(r, `git branch -d ${name} 失败`);
     }
     return ok({ output: joinOutput(r), deleted: name, status: await getStatus() });
+  })
+);
+
+server.registerTool(
+  "git_branch_merge",
+  {
+    title: "合并分支",
+    description:
+      "把指定分支合并进当前分支（git merge --no-edit <branch>），分支名可以是本地分支或 origin/xxx 形式的远程分支。产生冲突时返回错误，报错信息为 git 原始输出，冲突文件可通过 git_status 的 conflicts 查看；解决冲突后需自行 git_stage 并 git_commit 完成合并。可先用 git_branch_list 查看分支。",
+    inputSchema: {
+      name: z.string().regex(BRANCH_RE).describe("要合并进当前分支的分支名，本地分支名或 origin/xxx"),
+    },
+    ...uiMeta,
+  },
+  withTool(async (top, { name }) => {
+    const r = await runGit(["merge", "--no-edit", name], { cwd: top });
+    if (r.code !== 0) throw gitErr(r, `git merge ${name} 失败`);
+    return ok({ output: joinOutput(r), merged: name, status: await getStatus() });
   })
 );
 

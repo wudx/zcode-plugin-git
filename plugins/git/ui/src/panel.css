@@ -520,6 +520,28 @@ body {
 .branch-new-input:disabled { opacity: 0.45; }
 .branch-new-btn { flex: none; }
 
+/* 分支右键菜单：fixed 浮层钉在右击位置，不受 branch-menu 滚动容器裁剪 */
+#branch-ctx {
+  position: fixed;
+  z-index: 40;
+  min-width: 180px;
+  max-width: calc(100vw - 12px);
+  background: var(--git-bg-soft);
+  border: 1px solid var(--git-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+/* display 会覆盖 hidden 属性，必须显式收回（空浮层会拦截点击） */
+#branch-ctx[hidden] { display: none; }
+.branch-ctx-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-item.danger { color: var(--git-del); }
+#branch-ctx .branch-new { padding: 2px; }
+#branch-ctx .branch-new-input { min-width: 160px; }
+
 /* history menu：点击 header 时钟按钮打开，行内展开单条提交的 diff */
 #history-menu .menu-entries { max-height: 280px; }
 .commit-entry { border-radius: 6px; }

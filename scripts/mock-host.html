@@ -308,6 +308,15 @@ function toolResult(name, args) {
       BRANCHES.locals = BRANCHES.locals.filter((b) => b.name !== args.name);
       return { content: [{ type: "text", text: JSON.stringify({ output: `Deleted branch ${args.name} (was 9f01c3a).`, deleted: args.name, status: state }) }] };
     }
+    case "git_branch_merge": {
+      // wip-branch 模拟冲突合并：报错走 toast，冲突文件由 status 的 conflicts 展示
+      if (args.name === "wip-branch") {
+        const msg = "CONFLICT (content): Merge conflict in src/server.ts\nAutomatic merge failed; fix conflicts and then commit the result.";
+        return { isError: true, content: [{ type: "text", text: msg }], structuredContent: { ok: false, code: "GIT_ERROR", message: msg.split("\n")[0] } };
+      }
+      state = { ...state, ahead: (state.ahead || 0) + 2 };
+      return { content: [{ type: "text", text: JSON.stringify({ output: `Merge made by the 'ort' strategy.\n ${args.name} -> ${state.branch}`, merged: args.name, status: state }) }] };
+    }
     case "git_blob": {
       // 生成旧/新两张占位图，验证图片比对视图
       const canvas = document.createElement("canvas");

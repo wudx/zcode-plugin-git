@@ -12,7 +12,7 @@ import { app, callTool } from "./api.js";
 import { $ } from "./dom.js";
 import { render } from "./render.js";
 import { loadStashList, closeStash, runGitAction } from "./stash.js";
-import { loadBranchList, closeBranchMenu } from "./branches.js";
+import { loadBranchList, closeBranchMenu, closeBranchCtx } from "./branches.js";
 import { loadHistory, closeHistory } from "./history.js";
 import { applyStatus, refresh, runAction, toast, updateCommitBar, showFatal } from "./actions.js";
 
@@ -106,10 +106,12 @@ $("branch").addEventListener("keydown", (e) => {
   toggleBranchMenu();
 });
 
-// 菜单打开时：点击菜单外或按 Esc 关闭。
+// 菜单打开时：点击菜单外或按 Esc 关闭。#branch-ctx（分支右键菜单）点内不关
+// （交给菜单项自身 click），点外只关它自己，不牵连整个分支菜单。
 document.addEventListener("pointerdown", (e) => {
   if (stashOpen && !$("stash-menu").contains(e.target) && !$("stash-btn").contains(e.target)) closeStash();
-  if (branchOpen && !$("branch-menu").contains(e.target) && !$("branch").contains(e.target)) closeBranchMenu();
+  if (branchOpen && !$("branch-menu").contains(e.target) && !$("branch").contains(e.target) && !$("branch-ctx").contains(e.target)) closeBranchMenu();
+  closeBranchCtx(e);
   if (historyOpen && !$("history-menu").contains(e.target) && !$("history-btn").contains(e.target)) closeHistory();
 });
 document.addEventListener("keydown", (e) => {

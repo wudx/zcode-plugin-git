@@ -123,7 +123,7 @@ async function main() {
     "tools/list",
     JSON.stringify(names) ===
       JSON.stringify([
-        "git_blob", "git_branch_delete", "git_branch_list", "git_checkout", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push",
+        "git_blob", "git_branch_delete", "git_branch_list", "git_branch_merge", "git_checkout", "git_commit", "git_diff", "git_discard", "git_log", "git_pull", "git_push",
         "git_show", "git_stage", "git_stash", "git_stash_apply", "git_stash_drop", "git_stash_list", "git_stash_pop", "git_status", "git_unstage",
       ]),
     names.join(",")
@@ -278,6 +278,53 @@ async function main() {
   );
   r = await call("git_branch_list", {});
   check("git_branch_delete force removed from list", !r.payload?.locals?.some((b) => b.name === "unmerged-b"));
+
+  // --- branch merge suite（合并进当前分支：fast-forward / 冲突 GIT_ERROR / 非法分支名）----
+  await g(["checkout", "-b", "merge-b"]);
+  await writeFile(path.join(repo, "merge.txt"), "from merge-b\n");
+  await g(["add", "merge.txt"]);
+  const mMsg = path.join(repo, ".mmsg");
+  await writeFile(mMsg, "feat: merge-b commit");
+  await g(["commit", "--file=" + mMsg]);
+  await rm(mMsg);
+  await g(["checkout", "main"]);
+  r = await call("git_branch_merge", { name: "merge-b" });
+  check(
+    "git_branch_merge fast-forward brings content",
+    !r.isError
+      && r.payload?.status?.branch === "main"
+      && String(await readFile(path.join(repo, "merge.txt"), "utf8")).includes("from merge-b"),
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  r = await call("git_branch_merge", { name: "-evil" });
+  check("git_branch_merge rejects option-like branch", r.isError);
+  r = await call("git_branch_merge", { name: "no-such-branch" });
+  check("git_branch_merge missing branch errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
+  // 冲突：从当前 main 拉出 conflict-b 改同一行，随后 main 也改这一行
+  await g(["checkout", "-b", "conflict-b"]);
+  await writeFile(path.join(repo, "merge.txt"), "branch side\n");
+  await g(["add", "merge.txt"]);
+  const cMsg = path.join(repo, ".cmsg");
+  await writeFile(cMsg, "feat: branch side");
+  await g(["commit", "--file=" + cMsg]);
+  await rm(cMsg);
+  await g(["checkout", "main"]);
+  await writeFile(path.join(repo, "merge.txt"), "main side\n");
+  await g(["add", "merge.txt"]);
+  await writeFile(cMsg, "feat: main side");
+  await g(["commit", "--file=" + cMsg]);
+  await rm(cMsg);
+  r = await call("git_branch_merge", { name: "conflict-b" });
+  check(
+    "git_branch_merge conflict errors with git output",
+    r.isError && /CONFLICT|Automatic merge failed/.test(String(r.raw.structuredContent?.message || "")),
+    JSON.stringify(r.raw.structuredContent)
+  );
+  await g(["merge", "--abort"]); // 清掉冲突现场，不影响后续套件
+  r = await call("git_branch_delete", { name: "conflict-b", force: true });
+  check("git_branch_delete conflict-b force ok", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
+  r = await call("git_branch_delete", { name: "merge-b" });
+  check("git_branch_delete merge-b merged ok", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
 
   // --- stash suite -----------------------------------------------------------
   await writeFile(path.join(repo, "hello.txt"), "line1\nline2\nstashed\n");

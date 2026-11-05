@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// 分支菜单：分支列表渲染与 checkout 动作流程
+// 分支菜单：分支列表渲染、右键操作菜单与 checkout/merge 动作流程
 // ---------------------------------------------------------------------------
 
 import { t } from "./i18n.js";
@@ -12,13 +12,16 @@ import { runAction, toast } from "./actions.js";
 let newName = ""; // 新建分支输入框内容（跨重渲染保留，关闭菜单不清空）
 let deleteConfirmRef = null; // 正在二次确认删除的分支名
 let forceConfirmRef = null; // 未合并分支升级为强制删除的分支名
+let ctxRef = null; // 右键菜单：{ name, x, y }，null = 关闭
+let ctxNewRef = null; // 右键菜单「新建分支」输入态的起点分支名
 
-// 分支条目行：主体（✓ + 分支名 + ahead/behind + sha subject）+ 可选删除按钮。
-// current 当前分支禁用高亮且不可删；disabled 用于「远程已有同名本地分支」等不可点场景。
-function branchRow(entry, { current = false, disabled = false, title = "", deletable = false, onClick } = {}) {
+// 分支条目行：主体（✓ + 分支名 + ahead/behind + sha subject）。
+// current 当前分支禁用高亮；disabled 用于「远程已有同名本地分支」等不可点场景；
+// ctxMenu 在行上挂右键浮出操作菜单（合并/新建/删除）。
+function branchRow(entry, { current = false, disabled = false, title = "", ctxMenu = false, onClick } = {}) {
   const row = el("div", "menu-entry branch-entry");
   // 删除为不可恢复操作：行内二次确认；未合并分支升级为「强制删除」确认
-  if (deletable && (deleteConfirmRef === entry.name || forceConfirmRef === entry.name)) {
+  if (ctxMenu && (deleteConfirmRef === entry.name || forceConfirmRef === entry.name)) {
     const forcing = forceConfirmRef === entry.name;
     confirmUI(row, {
       question: (forcing ? t.branchDelForceConfirm : t.branchDelConfirm).replace("{name}", entry.name),
@@ -62,18 +65,13 @@ function branchRow(entry, { current = false, disabled = false, title = "", delet
     });
   }
   row.append(main);
-  if (deletable && !current) {
-    const del = document.createElement("button");
-    del.className = "btn icon";
-    del.innerHTML = ICONS.trash;
-    del.title = t.branchDelete;
-    del.disabled = busy;
-    del.addEventListener("click", (e) => {
+  if (ctxMenu) {
+    row.addEventListener("contextmenu", (e) => {
+      if (busy) return; // 动作执行中不弹菜单（行主体已禁用，但右键挂在行容器上仍会触发）
+      e.preventDefault();
       e.stopPropagation();
-      deleteConfirmRef = entry.name;
-      renderBranchMenu();
+      openBranchCtx(entry.name, e.clientX, e.clientY);
     });
-    row.append(del);
   }
   return row;
 }
@@ -86,39 +84,6 @@ export function renderBranchMenu() {
   }
   menu.hidden = false;
   menu.replaceChildren();
-
-  // 新建分支：输入 + 创建按钮，Enter 与按钮等价
-  const input = el("input", "branch-new-input");
-  input.value = newName;
-  input.placeholder = t.branchNewPlaceholder;
-  input.spellcheck = false;
-  input.maxLength = 120;
-  input.disabled = busy;
-  input.addEventListener("input", () => {
-    newName = input.value;
-  });
-  const doCreate = () => {
-    const name = newName.trim();
-    if (!name || busy) return;
-    runCheckout(name, { create: true });
-  };
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      doCreate();
-    }
-  });
-  const createBtn = el("button", "btn icon branch-new-btn");
-  createBtn.innerHTML = ICONS.plus;
-  createBtn.title = t.branchCreate;
-  createBtn.disabled = busy;
-  createBtn.addEventListener("click", (e) => {
-    e.stopPropagation();
-    doCreate();
-  });
-  const newRow = el("div", "branch-new");
-  newRow.append(input, createBtn);
-  menu.append(newRow, el("div", "menu-sep"));
 
   if (!branchState || branchState.phase === "loading") {
     menu.append(el("div", "menu-title", t.loading));
@@ -138,7 +103,8 @@ export function renderBranchMenu() {
   } else {
     const list = el("div", "menu-entries");
     for (const b of locals) {
-      list.append(branchRow(b, { current: b.current, deletable: true, onClick: () => runCheckout(b.name) }));
+      // 右键操作菜单：非当前分支 = 合并/新建/删除；当前分支仅新建（从 HEAD 建分支的唯一入口）
+      list.append(branchRow(b, { current: b.current, ctxMenu: true, onClick: () => runCheckout(b.name) }));
     }
     menu.append(list);
   }
@@ -168,6 +134,7 @@ export function renderBranchMenu() {
 export async function loadBranchList() {
   deleteConfirmRef = null; // 列表重新拉取，挂起的确认作废
   forceConfirmRef = null;
+  closeBranchCtx();
   setBranchState({ phase: "loading", locals: [], remotes: [] });
   renderBranchMenu();
   try {
@@ -190,7 +157,121 @@ export function closeBranchMenu() {
   setBranchState(null);
   deleteConfirmRef = null;
   forceConfirmRef = null;
+  closeBranchCtx();
   renderBranchMenu();
+}
+
+// ---------------------------------------------------------------------------
+// 分支右键菜单：fixed 浮层（合并到当前分支 / 新建分支 / 删除分支），
+// 挂在 #branch-ctx（panel.html 静态容器），不随分支列表滚动重定位。
+// ---------------------------------------------------------------------------
+function openBranchCtx(name, x, y) {
+  ctxRef = { name, x, y };
+  ctxNewRef = null;
+  renderBranchCtx();
+}
+
+/** 关闭右键菜单；e 给定时点在菜单内的 pointerdown 不算（交给菜单项自身的 click）。 */
+export function closeBranchCtx(e) {
+  if (!ctxRef) return;
+  if (e && $("branch-ctx").contains(e.target)) return;
+  ctxRef = null;
+  ctxNewRef = null;
+  renderBranchCtx();
+}
+
+function renderBranchCtx() {
+  const box = $("branch-ctx");
+  if (!ctxRef || !branchOpen) {
+    ctxRef = null;
+    ctxNewRef = null;
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.replaceChildren();
+
+  // 菜单项：图标 + 文案，样式复用 .menu-item
+  const mkItem = (icon, label, title, onClick, cls = "") => {
+    const b = el("button", "menu-item" + (cls ? " " + cls : ""));
+    b.title = title;
+    const ic = el("span", "menu-ic");
+    ic.innerHTML = icon;
+    b.append(ic, el("span", null, label));
+    b.disabled = busy;
+    b.addEventListener("click", onClick);
+    return b;
+  };
+
+  if (ctxNewRef) {
+    // 新建分支输入态：输入 + 创建按钮（起点 = 右键的分支），Enter 与按钮等价
+    box.append(el("div", "menu-title branch-ctx-name", t.branchCtxNewTitle.replace("{name}", ctxNewRef)));
+    const input = el("input", "branch-new-input");
+    input.value = newName;
+    input.placeholder = t.branchCtxNewPlaceholder.replace("{name}", ctxNewRef);
+    input.spellcheck = false;
+    input.maxLength = 120;
+    input.disabled = busy;
+    input.addEventListener("input", () => {
+      newName = input.value;
+    });
+    const doCreate = () => {
+      const name = newName.trim();
+      if (!name || busy) return;
+      runCheckout(name, { create: true, startPoint: ctxNewRef });
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        doCreate();
+      }
+    });
+    const createBtn = el("button", "btn icon branch-new-btn");
+    createBtn.innerHTML = ICONS.plus;
+    createBtn.title = t.branchCreate;
+    createBtn.disabled = busy;
+    createBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      doCreate();
+    });
+    const newRow = el("div", "branch-new");
+    newRow.append(input, createBtn);
+    box.append(newRow);
+    input.focus();
+  } else {
+    const name = ctxRef.name;
+    // 当前分支只有「新建分支」（顶部输入行已移除，这是从 HEAD 建分支的唯一入口）；
+    // 合并/删除对当前分支无意义，不渲染。
+    const items = [
+      mkItem(ICONS.plus, t.branchCtxNew, t.branchCtxNewTitle.replace("{name}", name), () => {
+        ctxNewRef = name;
+        renderBranchCtx();
+      }),
+    ];
+    if (!(branchState?.locals || []).some((b) => b.current && b.name === name)) {
+      items.unshift(
+        mkItem(ICONS.merge, t.branchCtxMerge, t.branchCtxMergeTitle.replace("{name}", name), () => {
+          closeBranchCtx();
+          runBranchMerge(name);
+        })
+      );
+      // 删除走既有行内二次确认流：收起浮层，替换对应行为确认 UI（未合并时升级强制删除）
+      items.push(
+        el("div", "menu-sep"),
+        mkItem(ICONS.trash, t.branchDelete, t.branchDelConfirm.replace("{name}", name), () => {
+          deleteConfirmRef = name;
+          closeBranchCtx();
+          renderBranchMenu();
+        }, "danger")
+      );
+    }
+    box.append(el("div", "menu-title branch-ctx-name", name), ...items);
+  }
+
+  // 渲染后按实际尺寸夹取进视口，贴边右击时不上溢出
+  const r = box.getBoundingClientRect();
+  box.style.left = Math.max(6, Math.min(ctxRef.x, window.innerWidth - r.width - 6)) + "px";
+  box.style.top = Math.max(6, Math.min(ctxRef.y, window.innerHeight - r.height - 6)) + "px";
 }
 
 /** 删除本地分支：默认 -d（未合并被拒时升级为行内「强制删除」确认）；菜单保持打开便于连续删除。 */
@@ -227,6 +308,17 @@ export function runCheckout(branch, { create = false, startPoint } = {}) {
     if (create) args.create = true;
     if (startPoint) args.startPoint = startPoint;
     const r = await callTool("git_checkout", args);
+    closeBranchMenu();
+    const line = String(r?.output || "").split("\n")[0].trim();
+    if (line) toast(line, "ok");
+  });
+}
+
+/** 合并进当前分支：执行 → 关菜单 → toast git 输出首行（如 Fast-forward）。
+ * 冲突时 runAction 统一 toast git 报错，冲突文件由刷新后的「合并冲突」分区接手。 */
+export function runBranchMerge(name) {
+  return runAction(async () => {
+    const r = await callTool("git_branch_merge", { name });
     closeBranchMenu();
     const line = String(r?.output || "").split("\n")[0].trim();
     if (line) toast(line, "ok");
