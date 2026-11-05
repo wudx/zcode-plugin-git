@@ -15,7 +15,7 @@ export let splitDiff = lsGet("zcode-git.diffView") === "split";
 // diff 上下文范围：line=±10 行；line20=±20 行；file=整个文件
 export let diffScope = ["line", "line20", "file"].includes(lsGet("zcode-git.scope")) ? lsGet("zcode-git.scope") : "line";
 export let customPrompt = lsGet("zcode-git.customPrompt") ?? "";
-export let promptOpen = customPrompt !== "";
+export let promptOpen = lsGet("zcode-git.promptOpen") === "1";
 export const collapsedDirs = new Set(); // "area:dir/path" -> collapsed
 // 分区折叠（暂存/工作区）：持久化记忆，点击分区头切换
 export let stagedCollapsed = lsGet("zcode-git.stagedCollapsed") === "1";
@@ -32,7 +32,10 @@ export function setTreeMode(v) { treeMode = v; }
 export function setSplitDiff(v) { splitDiff = v; }
 export function setDiffScope(v) { diffScope = v; }
 export function setCustomPrompt(v) { customPrompt = v; }
-export function setPromptOpen(v) { promptOpen = v; }
+export function setPromptOpen(v) {
+  promptOpen = v;
+  lsSet("zcode-git.promptOpen", v ? "1" : "0");
+}
 export function setStashOpen(v) { stashOpen = v; }
 export function setStashState(v) { stashState = v; }
 export function setStagedCollapsed(v) {

@@ -94,7 +94,7 @@ $("commit-btn").addEventListener("click", () => {
   });
 });
 
-// 自定义 AI 提示词：内容与展开状态都记忆（有内容时默认展开）。
+// 自定义 AI 提示词：内容与展开状态分开记忆，默认收起，不随有无内容自动展开。
 $("prompt-btn").addEventListener("click", () => {
   setPromptOpen(!promptOpen);
   $("prompt-area").hidden = !promptOpen;
