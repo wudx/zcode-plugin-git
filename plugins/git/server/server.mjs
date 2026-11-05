@@ -71,6 +71,8 @@ const MAX_DIFF_LINES = 4000;
 const NUL_SNIFF_BYTES = 8000;
 // 分支名/起点/提交 hash 通配校验：拒绝选项注入（前导 -）、git 非法字符与范围语法
 const BRANCH_RE = /^(?!-)(?!.*\.\.)[^\s~^:?*\[\\]+$/;
+// UGit「切换分支贮藏」产生的 ugit-stash/* 备份分支：机器生成的贮藏快照，不是可操作分支，列表直接隐藏
+const STASH_BACKUP_RE = /^ugit-stash\//;
 
 function runGit(args, { cwd, stdin, timeout = DEFAULT_TIMEOUT } = {}) {
   return new Promise((resolve, reject) => {
@@ -558,7 +560,7 @@ server.registerTool(
   {
     title: "查看分支列表",
     description:
-      "查看分支列表，返回 locals 与 remotes 两个数组（按最近提交排序）。本地分支条目含 current（是否当前分支）、sha/subject（最新提交）、ahead/behind（相对上游，无上游为 0）；远程分支条目 name 为 origin/xxx 形式，current/ahead/behind 恒为 false/0。origin/HEAD 等符号引用已过滤。切换分支用 git_checkout，删除本地分支用 git_branch_delete，合并进当前分支用 git_branch_merge。",
+      "查看分支列表，返回 locals 与 remotes 两个数组（按最近提交排序）。本地分支条目含 current（是否当前分支）、sha/subject（最新提交）、ahead/behind（相对上游，无上游为 0）；远程分支条目 name 为 origin/xxx 形式，current/ahead/behind 恒为 false/0。origin/HEAD 等符号引用与 ugit-stash/*（客户端切换分支贮藏的备份分支）不包含在列表内。切换分支用 git_checkout，删除本地分支用 git_branch_delete，合并进当前分支用 git_branch_merge。",
     inputSchema: {},
     ...uiMeta,
   },
@@ -586,7 +588,7 @@ server.registerTool(
     if (local.code !== 0) throw gitErr(local, "git branch list 失败");
     if (remote.code !== 0) throw gitErr(remote, "git branch list 失败");
     return ok({
-      locals: parse(local.stdout),
+      locals: parse(local.stdout).filter((b) => !STASH_BACKUP_RE.test(b.name)),
       remotes: parse(remote.stdout).filter((e) => !/\/HEAD$/.test(e.name)),
     });
   })

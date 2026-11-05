@@ -326,6 +326,15 @@ async function main() {
   r = await call("git_branch_delete", { name: "merge-b" });
   check("git_branch_delete merge-b merged ok", !r.isError, r.isError ? r.raw.content?.[0]?.text : "");
 
+  // ugit-stash/*（客户端切换分支贮藏的备份分支）不进本地分支列表
+  await g(["branch", "ugit-stash/deadbee-1"]);
+  r = await call("git_branch_list", {});
+  check(
+    "git_branch_list hides ugit-stash backup branches",
+    !r.payload?.locals?.some((b) => /^ugit-stash\//.test(b.name)),
+    JSON.stringify(r.payload?.locals?.map((b) => b.name))
+  );
+
   // --- stash suite -----------------------------------------------------------
   await writeFile(path.join(repo, "hello.txt"), "line1\nline2\nstashed\n");
   r = await call("git_stash", {});
