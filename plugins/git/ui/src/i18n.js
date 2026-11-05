@@ -7,6 +7,8 @@ export const STR = {
   "zh-CN": {
     stagedChanges: "暂存的更改",
     worktreeChanges: "工作区更改",
+    collapseSection: "折叠分区",
+    expandSection: "展开分区",
     conflicts: "合并冲突",
     resolveMark: "标记已解决",
     untracked: "未跟踪",
@@ -77,6 +79,8 @@ export const STR = {
   en: {
     stagedChanges: "Staged Changes",
     worktreeChanges: "Working Tree Changes",
+    collapseSection: "Collapse section",
+    expandSection: "Expand section",
     conflicts: "Merge Conflicts",
     resolveMark: "Mark resolved",
     untracked: "Untracked",

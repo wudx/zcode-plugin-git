@@ -4,7 +4,9 @@ import { ICONS } from "./icons.js";
 import { lsGet, lsSet } from "./storage.js";
 import {
   status, busy, treeMode, customPrompt, promptOpen, lastStatusJson,
-  stashOpen, setStashOpen, setTreeMode, setCustomPrompt, setPromptOpen,
+  stashOpen, stagedCollapsed, worktreeCollapsed,
+  setStashOpen, setTreeMode, setCustomPrompt, setPromptOpen,
+  setStagedCollapsed, setWorktreeCollapsed,
 } from "./state.js";
 import { app, callTool } from "./api.js";
 import { $ } from "./dom.js";
@@ -32,6 +34,24 @@ $("view-btn").addEventListener("click", () => {
   applyViewIcon();
   render();
 });
+
+// 分区折叠：点击/回车切换（分区头上的批量按钮不触发折叠）
+function toggleSection(hId, collapsed, set) {
+  $(hId).addEventListener("click", (e) => {
+    if (e.target.closest(".sec-actions")) return;
+    set(!collapsed());
+    render();
+  });
+  $(hId).addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    if (e.target.closest(".sec-actions")) return;
+    e.preventDefault();
+    set(!collapsed());
+    render();
+  });
+}
+toggleSection("staged-h", () => stagedCollapsed, setStagedCollapsed);
+toggleSection("worktree-h", () => worktreeCollapsed, setWorktreeCollapsed);
 
 $("pull-btn").addEventListener("click", () => runGitAction("git_pull", {}));
 

@@ -4,7 +4,7 @@
 
 import { t } from "./i18n.js";
 import { ICONS } from "./icons.js";
-import { status, expanded, treeMode, scopeArgs } from "./state.js";
+import { status, expanded, treeMode, scopeArgs, stagedCollapsed, worktreeCollapsed } from "./state.js";
 import { callTool } from "./api.js";
 import { $, iconBtn, confirmUI } from "./dom.js";
 import { rowEl, treeEl } from "./rows.js";
@@ -45,8 +45,17 @@ export function render() {
   const unstaged = status.unstaged || [];
   $("staged-count").textContent = staged.length ? `(${staged.length})` : "";
   $("worktree-count").textContent = unstaged.length ? `(${unstaged.length})` : "";
-  $("staged-empty").hidden = staged.length > 0;
-  $("worktree-empty").hidden = unstaged.length > 0;
+  // 分区折叠：收起时列表与空态一并隐藏，chevron 旋转提示可展开
+  $("staged-chev").classList.toggle("collapsed", stagedCollapsed);
+  $("worktree-chev").classList.toggle("collapsed", worktreeCollapsed);
+  $("staged-chev").title = stagedCollapsed ? t.expandSection : t.collapseSection;
+  $("worktree-chev").title = worktreeCollapsed ? t.expandSection : t.collapseSection;
+  $("staged-h").setAttribute("aria-expanded", String(!stagedCollapsed));
+  $("worktree-h").setAttribute("aria-expanded", String(!worktreeCollapsed));
+  $("staged-list").hidden = stagedCollapsed;
+  $("worktree-list").hidden = worktreeCollapsed;
+  $("staged-empty").hidden = stagedCollapsed || staged.length > 0;
+  $("worktree-empty").hidden = worktreeCollapsed || unstaged.length > 0;
   $("clean").hidden = staged.length + unstaged.length > 0;
 
   // 分区头部的「全部暂存 / 全部取消暂存 / 全部撤销」（悬停浮现的图标按钮）

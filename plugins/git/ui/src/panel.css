@@ -142,7 +142,12 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
+  cursor: pointer;
+  user-select: none;
 }
+.section-h:focus-visible { outline: 1px solid var(--git-accent); outline-offset: -1px; }
+/* 分区头 chevron：比树目录行的大一号，点击目标更明显 */
+.section-h .chev { font-size: 12px; width: 12px; text-align: center; }
 /* 分区批量操作：悬停/聚焦分区标题时浮现 */
 .sec-actions { display: inline-flex; gap: 4px; opacity: 0; transition: opacity 0.15s; }
 .section-h:hover .sec-actions,
