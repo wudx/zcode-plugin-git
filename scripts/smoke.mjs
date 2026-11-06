@@ -478,10 +478,21 @@ async function main() {
   r = await call("git_diff_batch", { paths: ["新文件.txt", "hello.txt"], staged: false });
   check("git_diff_batch untracked synthesized", !r.isError && r.payload?.diffs?.[0]?.text?.includes("+untracked content"), "");
   check("git_diff_batch unchanged placeholder", r.payload?.diffs?.[1]?.text?.includes("没有该文件的变更"), "");
+  // 未跟踪二进制（图片）：不合成文本 diff，binary:true 交面板走 git_blob 图片预览
+  const PNG_UNTRACKED = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  await writeFile(path.join(repo, "新图片.png"), PNG_UNTRACKED);
+  r = await call("git_diff", { path: "新图片.png" });
+  check("git_diff untracked binary flag", !r.isError && r.payload?.binary === true && !r.payload?.text, JSON.stringify(r.payload));
+  r = await call("git_diff_batch", { paths: ["新文件.txt", "新图片.png"], staged: false });
+  check("git_diff_batch untracked binary flag", r.payload?.diffs?.[1]?.binary === true && r.payload?.diffs?.[0]?.text?.includes("+untracked content"), "");
   // 还原：硬重置到 fixture 提交并清掉磁盘残留，后续「空暂存区提交报错」等断言依赖干净状态
   await g(["reset", "--hard", "HEAD"]);
   await rm(path.join(repo, "batch.bin"), { force: true });
   await rm(path.join(repo, "新文件.txt"), { force: true });
+  await rm(path.join(repo, "新图片.png"), { force: true });
   await rm(path.join(repo, "资产"), { recursive: true, force: true });
 
   // --- git_blob（图片预览比对的数据源）----------------------------------------

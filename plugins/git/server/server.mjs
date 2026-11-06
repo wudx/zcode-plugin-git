@@ -5,7 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { spawn } from "node:child_process";
-import { stat, readFile, rm } from "node:fs/promises";
+import { stat, readFile, rm, open } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { IMAGE_MIME } from "../../shared/images.js";
@@ -295,12 +295,28 @@ async function fileDiff(top, entry, staged, context, scope) {
   if (!staged && code === "?" && !unmerged) {
     // Untracked: synthesize an all-added diff.
     const abs = path.join(top, ...p.split("/"));
+    let st, head;
+    try {
+      st = await stat(abs);
+      // 只读头部嗅探 NUL，避免为大二进制整读进内存
+      head = Buffer.alloc(Math.min(st.size, NUL_SNIFF_BYTES));
+      const fh = await open(abs, "r");
+      try {
+        const { bytesRead } = await fh.read(head, 0, head.length, 0);
+        head = head.subarray(0, bytesRead);
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      return { path: p, staged: false, binary: false, text: `（无法读取文件：${p}）` };
+    }
+    // 含 NUL 视为二进制（图片等）：binary:true 让面板走图片预览/二进制占位，而非乱码文本 diff
+    if (head.includes(0)) return { path: p, staged: false, binary: true, text: "" };
+    if (st.size > MAX_DIFF_BYTES) {
+      return { path: p, staged: false, binary: false, truncated: true, text: `--- /dev/null\n+++ b/${p}\n@@ -0,0 1,1 @@\n+（文件超过 ${MAX_DIFF_BYTES / 1024}KB，未显示内容）` };
+    }
     let content;
     try {
-      const st = await stat(abs);
-      if (st.size > MAX_DIFF_BYTES) {
-        return { path: p, staged: false, binary: false, truncated: true, text: `--- /dev/null\n+++ b/${p}\n@@ -0,0 1,1 @@\n+（文件超过 ${MAX_DIFF_BYTES / 1024}KB，未显示内容）` };
-      }
       content = await readFile(abs, "utf8");
     } catch {
       return { path: p, staged: false, binary: false, text: `（无法读取文件：${p}）` };
