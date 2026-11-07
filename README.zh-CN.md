@@ -97,7 +97,7 @@ scripts/
 | `git_show` | 某次提交的完整 diff（`--format=`，hash 来自 git_log） |
 | `git_pull` | git pull --no-edit |
 | `git_push` | 推送当前分支到上游远程（新分支无上游时自动以 -u 建立跟踪后重推） |
-| `git_stash` | git stash push -u（含未跟踪文件） |
+| `git_stash` | git stash push -u（含未跟踪文件）；可选 paths / message 做部分存储 |
 | `git_stash_pop` | 恢复最近一次存储并移除条目 |
 | `git_stash_apply` | 应用指定条目（保留） |
 | `git_stash_list` | stash 列表（ref + 说明） |

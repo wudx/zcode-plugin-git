@@ -790,17 +790,25 @@ server.registerTool(
 server.registerTool(
   "git_stash",
   {
-    title: "存储全部改动",
+    title: "存储改动",
     description:
-      "把暂存区与工作区的全部改动存入 stash（git stash push -u，包含未跟踪文件，.gitignore 忽略的文件除外）。没有可存储的改动时报错。",
-    inputSchema: {},
+      "把改动存入 stash（git stash push -u，包含未跟踪文件，.gitignore 忽略的文件除外）。可选 paths 只存储这些仓库内相对路径的改动（等价 git stash push -u -- <paths>），可选 message 自定义存储说明；都不传则存储全部改动。没有匹配到可存储的改动时不算错误，返回 git 的提示输出（No local changes to save）。",
+    inputSchema: {
+      paths: z.array(z.string().min(1)).min(1).optional().describe("只存储这些仓库内相对路径的改动；不传则存储全部改动"),
+      message: z.string().min(1).optional().describe("存储说明（git stash push -m），便于在存储列表中辨认"),
+    },
     ...uiMeta,
   },
-  withTool(async (top) => {
+  withTool(async (top, { paths, message }) => {
     // -u：连未跟踪文件一起入栈，否则新文件存储后还原不回来。
-    const r = await runGit(["stash", "push", "-u"], { cwd: top });
+    // pathspec 必须有 -- 分隔：防以 - 开头的路径被当成 flag。
+    const safe = paths?.map(assertSafePath);
+    const args = ["stash", "push", "-u"];
+    if (message) args.push("-m", message);
+    if (safe) args.push("--", ...safe);
+    const r = await runGit(args, { cwd: top });
     if (r.code !== 0) throw gitErr(r, "git stash 失败");
-    return ok({ output: joinOutput(r), status: await getStatus() });
+    return ok(safe ? { output: joinOutput(r), stashed: safe, status: await getStatus() } : { output: joinOutput(r), status: await getStatus() });
   })
 );
 

@@ -97,7 +97,7 @@ scripts/
 | `git_show` | Full diff of a commit (`--format=`; hash from git_log) |
 | `git_pull` | `git pull --no-edit` |
 | `git_push` | Push the current branch to its upstream (sets upstream with `-u` automatically for new branches) |
-| `git_stash` | `git stash push -u` (includes untracked files) |
+| `git_stash` | `git stash push -u` (includes untracked files); optional `paths` / `message` for partial stash |
 | `git_stash_pop` | Pop the latest stash entry |
 | `git_stash_apply` | Apply a stash entry (keep it) |
 | `git_stash_list` | List stash entries (ref + subject) |

@@ -365,6 +365,65 @@ async function main() {
   // 收尾：丢弃 pop 带回的改动，保持后续断言环境干净
   await call("git_discard", { paths: ["hello.txt"] });
 
+  // --- stash 部分存储（paths / message 参数）----------------------------------
+  await writeFile(path.join(repo, "hello.txt"), "line1\nline2\npartial\n");
+  await writeFile(path.join(repo, "partial-new.txt"), "untracked keep\n");
+  r = await call("git_stash", { paths: ["hello.txt"], message: "smoke partial" });
+  check(
+    "git_stash paths stashes only target",
+    !r.isError
+      && !r.payload?.status?.unstaged?.some((e) => e.path === "hello.txt")
+      && r.payload?.status?.unstaged?.some((e) => e.path === "partial-new.txt")
+      && r.payload?.status?.stashes === 1,
+    r.isError ? r.raw.content?.[0]?.text : JSON.stringify(r.payload?.status?.unstaged)
+  );
+  check("git_stash paths echoes stashed list", Array.isArray(r.payload?.stashed) && r.payload.stashed[0] === "hello.txt", JSON.stringify(r.payload?.stashed));
+  r = await call("git_stash_list", {});
+  check("git_stash message recorded", String(r.payload?.entries?.[0]?.message || "").includes("smoke partial"), JSON.stringify(r.payload?.entries?.[0]));
+  // 未跟踪文件也可单独存储（-u 使 pathspec 命中新文件）
+  r = await call("git_stash", { paths: ["partial-new.txt"] });
+  check(
+    "git_stash paths stashes untracked file",
+    !r.isError && !r.payload?.status?.unstaged?.some((e) => e.path === "partial-new.txt") && r.payload?.status?.stashes === 2,
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  // pathspec 无匹配不算错误：返回 git 的提示输出（与全量存储无改动时同一行为）
+  r = await call("git_stash", { paths: ["不存在的.txt"] });
+  check(
+    "git_stash unmatched pathspec is not error",
+    !r.isError && String(r.payload?.output || "").includes("No local changes to save"),
+    r.isError ? r.raw.content?.[0]?.text : String(r.payload?.output)
+  );
+  // 多文件一次存入同一条 stash：paths 传多个路径
+  await writeFile(path.join(repo, "hello.txt"), "line1\nline2\nmulti\n");
+  await writeFile(path.join(repo, "multi-b.txt"), "b\n");
+  r = await call("git_stash", { paths: ["hello.txt", "multi-b.txt"], message: "smoke multi" });
+  check(
+    "git_stash multiple paths in one entry",
+    !r.isError
+      && r.payload?.stashed?.length === 2
+      && !r.payload?.status?.unstaged?.some((e) => e.path === "hello.txt" || e.path === "multi-b.txt")
+      && r.payload?.status?.stashes === 3,
+    r.isError ? r.raw.content?.[0]?.text : JSON.stringify(r.payload?.status?.unstaged)
+  );
+  r = await call("git_stash_pop", {});
+  check(
+    "git_stash_pop restores multi stash",
+    !r.isError
+      && r.payload?.status?.unstaged?.some((e) => e.path === "hello.txt")
+      && r.payload?.status?.unstaged?.some((e) => e.path === "multi-b.txt"),
+    r.isError ? r.raw.content?.[0]?.text : ""
+  );
+  await call("git_discard", { paths: ["hello.txt"] });
+  await rm(path.join(repo, "multi-b.txt"), { force: true });
+  // 还原两条存储，确认内容回到工作区后清场
+  r = await call("git_stash_pop", {});
+  check("git_stash_pop restores untracked stash", !r.isError && r.payload?.status?.unstaged?.some((e) => e.path === "partial-new.txt"), r.isError ? r.raw.content?.[0]?.text : "");
+  r = await call("git_stash_pop", {});
+  check("git_stash_pop restores partial stash", !r.isError && r.payload?.status?.unstaged?.some((e) => e.path === "hello.txt"), r.isError ? r.raw.content?.[0]?.text : "");
+  await call("git_discard", { paths: ["hello.txt"] });
+  await rm(path.join(repo, "partial-new.txt"), { force: true });
+
   // --- pull without upstream must error --------------------------------------
   r = await call("git_pull", {});
   check("git_pull without upstream errors", r.isError, r.isError ? "" : r.raw.content?.[0]?.text);
