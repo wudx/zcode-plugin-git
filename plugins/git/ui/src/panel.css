@@ -185,6 +185,24 @@ body {
 }
 .row:hover { background: var(--git-bg-soft); }
 .row.expanded { background: var(--git-bg-soft); }
+/* 勾选待存储的文件：主题色淡底，压过 hover/展开底色 */
+.row.sel { background: color-mix(in srgb, var(--git-accent) 14%, transparent); }
+.row.sel:hover { background: color-mix(in srgb, var(--git-accent) 22%, transparent); }
+.row-sel {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  margin: 0 1px;
+  accent-color: var(--git-accent);
+  cursor: pointer;
+  /* 与行内按钮同款：悬停/聚焦该行才浮现；勾选后常显保持状态可见 */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.row:hover .row-sel,
+.row:focus-within .row-sel,
+.row-sel:checked { opacity: 1; pointer-events: auto; }
 .row-main {
   display: flex;
   align-items: center;

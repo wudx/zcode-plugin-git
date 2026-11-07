@@ -4,7 +4,7 @@
 
 import { t } from "./i18n.js";
 import { callTool, isNoGit, isNoRepo } from "./api.js";
-import { status, busy, expanded, diffScope, setStatus, setBusy, keyOf, scopeArgs } from "./state.js";
+import { status, busy, expanded, diffScope, selected, setStatus, setBusy, keyOf, scopeArgs } from "./state.js";
 import { $ } from "./dom.js";
 import { render } from "./render.js";
 
@@ -14,6 +14,7 @@ export function applyStatus(fresh) {
   if (fresh && fresh.ok !== false) {
     $("fatal").hidden = true;
     reconcileExpanded(fresh);
+    reconcileSelected(fresh);
     render();
   } else {
     const msg = fresh?.reason === "not_a_git_repo" ? t.notRepo : String(fresh?.error || "unknown");
@@ -81,7 +82,15 @@ function refreshDiffSilent(key) {
     });
 }
 
+/** 勾选对账：文件已不在变更列表（被存储/提交/外部删除）时出清勾选；
+ *  存储失败走不到 refresh，勾选原样保留便于重试。 */
+function reconcileSelected(st) {
+  const alive = new Set([...(st.staged || []), ...(st.unstaged || [])].map((e) => e.path));
+  for (const p of [...selected]) if (!alive.has(p)) selected.delete(p);
+}
+
 export function showFatal(msg) {
+  selected.clear(); // 列表整体失效，勾选随之作废
   $("fatal").textContent = msg;
   $("fatal").hidden = false;
   $("staged-list").replaceChildren();

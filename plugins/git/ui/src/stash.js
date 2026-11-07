@@ -5,7 +5,7 @@
 import { t } from "./i18n.js";
 import { ICONS } from "./icons.js";
 import { callTool } from "./api.js";
-import { status, busy, stashOpen, stashState, setStashOpen, setStashState } from "./state.js";
+import { status, busy, stashOpen, stashState, selected, setStashOpen, setStashState } from "./state.js";
 import { $, confirmUI } from "./dom.js";
 import { runAction, toast } from "./actions.js";
 
@@ -38,6 +38,15 @@ export function renderStashMenu() {
   menu.replaceChildren();
   const stashes = status?.stashes ?? 0;
   const nothing = !status || ((status.staged || []).length + (status.unstaged || []).length === 0);
+  // 勾选了文件时优先给批量入口：一次 git_stash 把选中路径存进同一条 stash。
+  // 不手动清空 selected：成功后文件从 status 消失由 applyStatus 对账出清，失败则保留勾选便于重试
+  if (selected.size > 0) {
+    menu.appendChild(
+      menuItem(ICONS.stashIn, t.stashSelected.replace("{n}", String(selected.size)), busy, () =>
+        runGitAction("git_stash", { paths: [...selected] })
+      )
+    );
+  }
   menu.appendChild(
     menuItem(ICONS.stashIn, t.stashAll, nothing || busy, () => runGitAction("git_stash", {}))
   );

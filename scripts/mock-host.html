@@ -209,6 +209,8 @@ const SCENARIOS = {
 const STASHES = [
   { ref: "stash@{0}", message: "WIP on feat/git-panel: 9f01c3a feat(git): add workbench panel" },
   { ref: "stash@{1}", message: "On main: 实验性 diff 并排视图" },
+  { ref: "stash@{2}", message: "On feat/git-panel: 部分存储 src/server.ts" },
+  { ref: "stash@{3}", message: "WIP on main: 3e782b5 feat(git): 新增 git_diff_batch" },
 ];
 
 const BRANCHES = {
@@ -287,8 +289,18 @@ function toolResult(name, args) {
     case "git_stash_list":
       return { content: [{ type: "text", text: JSON.stringify({ entries: STASHES.slice(0, state.stashes ?? 0) }) }] };
     case "git_stash": {
-      state = { ...state, staged: [], unstaged: [], stashes: (state.stashes ?? 0) + 1 };
-      return { content: [{ type: "text", text: JSON.stringify({ output: "Saved working directory and index state WIP on " + state.branch, status: state }) }] };
+      // 与真 server 对齐：paths 有值 = 部分存储，只移除这些路径（含重命名的 origPath）；否则清空全部分区
+      const moved = args.paths ?? null;
+      state = JSON.parse(JSON.stringify(state));
+      if (moved) {
+        state.staged = state.staged.filter((e) => !moved.includes(e.path));
+        state.unstaged = state.unstaged.filter((e) => !moved.includes(e.path) && !moved.includes(e.origPath));
+      } else {
+        state.staged = [];
+        state.unstaged = [];
+      }
+      state.stashes = (state.stashes ?? 0) + 1;
+      return { content: [{ type: "text", text: JSON.stringify({ output: "Saved working directory and index state WIP on " + state.branch, stashed: moved ?? undefined, status: state }) }] };
     }
     case "git_stash_pop": {
       state = { ...state, stashes: Math.max(0, (state.stashes ?? 0) - 1), unstaged: JSON.parse(JSON.stringify(SCENARIOS.rich.unstaged)) };

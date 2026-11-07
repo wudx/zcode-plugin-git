@@ -4,10 +4,11 @@
 
 import { t } from "./i18n.js";
 import { ICONS } from "./icons.js";
-import { keyOf, collapsedDirs } from "./state.js";
+import { keyOf, collapsedDirs, selected } from "./state.js";
 import { callTool } from "./api.js";
 import { el, iconBtn, confirmUI } from "./dom.js";
 import { runAction, toggleDiff } from "./actions.js";
+import { renderStashMenu } from "./stash.js";
 import { render } from "./render.js";
 
 const ROW_INDENT = 12; // 树层级缩进步长（px）
@@ -27,6 +28,23 @@ export function rowEl(entry, staged, depth = 0) {
   const key = keyOf(staged, entry.path);
   row.dataset.key = key;
   if (depth > 0) row.style.paddingLeft = ROW_INDENT + depth * ROW_INDENT + "px";
+
+  // 勾选框：勾中的文件可在存储菜单一次性存入同一条 stash（悬停浮现，勾选后常显）；
+  // 合并冲突中的文件 stash 会整体失败，不给勾选
+  if (!entry.unmerged) {
+    const cb = el("input", "row-sel");
+    cb.type = "checkbox";
+    cb.checked = selected.has(entry.path);
+    cb.title = t.selFileTitle;
+    cb.addEventListener("change", () => {
+      if (cb.checked) selected.add(entry.path);
+      else selected.delete(entry.path);
+      row.classList.toggle("sel", cb.checked);
+      renderStashMenu(); // 菜单开着时同步「存储选中的文件（N）」
+    });
+    if (cb.checked) row.classList.add("sel");
+    row.appendChild(cb);
+  }
 
   const main = el("div", "row-main");
   main.appendChild(badgeEl(entry.code));
@@ -69,7 +87,7 @@ export function rowEl(entry, staged, depth = 0) {
     if (entry.unmerged) {
       btns.appendChild(iconBtn({ icon: ICONS.plus, title: t.resolveMark, onClick: () => runAction(() => callTool("git_stage", { paths: [entry.path] })) }));
     } else if (staged) {
-      btns.appendChild(iconBtn({ icon: ICONS.minus, title: t.unstage, onClick: () => runAction(() => callTool("git_unstage", { paths: [entry.path] })) }));
+      btns.appendChild(iconBtn({ icon: ICONS.minus, title: t.unstage, onClick: () => runAction(() => callTool("git_stage", { paths: [entry.path] })) }));
     } else if (isUntracked) {
       btns.appendChild(iconBtn({ icon: ICONS.plus, title: t.stage, cls: "primary", onClick: () => runAction(() => callTool("git_stage", { paths: [entry.path] })) }));
       btns.appendChild(iconBtn({ icon: ICONS.trash, title: t.deleteFile, cls: "danger", onClick: askConfirm }));

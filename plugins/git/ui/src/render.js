@@ -4,7 +4,7 @@
 
 import { t } from "./i18n.js";
 import { ICONS } from "./icons.js";
-import { status, expanded, treeMode, scopeArgs, stagedCollapsed, worktreeCollapsed } from "./state.js";
+import { status, expanded, treeMode, scopeArgs, stagedCollapsed, worktreeCollapsed, selected } from "./state.js";
 import { callTool } from "./api.js";
 import { $, el, iconBtn, confirmUI } from "./dom.js";
 import { rowEl, treeEl } from "./rows.js";
@@ -58,11 +58,27 @@ export function render() {
   $("worktree-empty").hidden = worktreeCollapsed || unstaged.length > 0;
   $("clean").hidden = staged.length + unstaged.length > 0;
 
-  // 分区头部的「全部暂存 / 全部取消暂存 / 全部撤销」（悬停浮现的图标按钮）
+  // 分区头部的「全部暂存 / 全部取消暂存 / 全部撤销」（悬停浮现的图标按钮）。
+  // 全部暂存/全部取消暂存勾选感知：有勾选时（点击时）只作用于勾选的文件，无勾选保持全量
   $("staged-all").replaceChildren();
   $("worktree-all").replaceChildren();
-  mkAllButton($("staged-all"), ICONS.minus, t.unstageAll, staged.map((e) => e.path), "git_unstage");
-  mkAllButton($("worktree-all"), ICONS.plus, t.stageAll, unstaged.map((e) => e.path), "git_stage");
+  mkAllButton(
+    $("staged-all"), ICONS.minus, t.unstageAll,
+    () => {
+      if (!selected.size) return staged.map((e) => e.path);
+      // 只取消勾选中已暂存的文件；勾选里没有暂存区文件时回退全量
+      //（restore --staged 的 pathspec 若命中未跟踪文件不在索引，会整批报错）
+      const inStaged = new Set(staged.map((e) => e.path));
+      const picked = [...selected].filter((p) => inStaged.has(p));
+      return picked.length ? picked : staged.map((e) => e.path);
+    },
+    "git_unstage", false, t.unstageAllTip, () => selected.clear()
+  );
+  mkAllButton(
+    $("worktree-all"), ICONS.plus, t.stageAll,
+    () => (selected.size ? [...selected] : unstaged.map((e) => e.path)),
+    "git_stage", false, t.stageAllTip, () => selected.clear()
+  );
   mkAllButton($("worktree-all"), ICONS.undo, t.discardAll, unstaged.map((e) => e.path), "git_discard", true);
 
   const sList = $("staged-list");
@@ -112,14 +128,21 @@ export function render() {
   renderHistoryMenu();
 }
 
-function mkAllButton(box, icon, label, paths, tool, needConfirm = false) {
+function mkAllButton(box, icon, label, pathsOrFn, tool, needConfirm = false, tip, afterOk) {
   // 每个按钮独占一个 slot，同一分区头可放多个批量按钮（容器由 render 清空）
   const slot = document.createElement("span");
   slot.style.display = "inline-flex";
   slot.style.gap = "4px";
   box.appendChild(slot);
-  if (!paths.length) return;
-  const run = () => runAction(() => callTool(tool, { paths }));
+  // pathsOrFn 传函数时点击瞬间再解析：全部暂存的勾选作用域以点击时为准
+  const resolve = () => (typeof pathsOrFn === "function" ? pathsOrFn() : pathsOrFn);
+  if (!resolve().length) return;
+  const run = () =>
+    runAction(async () => {
+      await callTool(tool, { paths: resolve() });
+      // afterOk 只在成功后执行：git 报错走 toast，勾选保留便于重试
+      if (afterOk) afterOk();
+    });
   // 危险操作（全部撤销）走行内二次确认：问题文案 + 确认按钮，Esc/失焦取消
   const showConfirm = () => {
     confirmUI(slot, {
@@ -132,7 +155,7 @@ function mkAllButton(box, icon, label, paths, tool, needConfirm = false) {
     });
   };
   const showIcon = () => {
-    slot.replaceChildren(iconBtn({ icon, title: label, onClick: () => (needConfirm ? showConfirm() : run()) }));
+    slot.replaceChildren(iconBtn({ icon, title: tip || label, onClick: () => (needConfirm ? showConfirm() : run()) }));
   };
   slot.addEventListener("focusout", (e) => {
     if (!slot.contains(e.relatedTarget)) showIcon();

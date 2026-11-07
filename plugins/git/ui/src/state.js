@@ -8,6 +8,9 @@ import { t } from "./i18n.js";
 
 export let status = null;
 export const expanded = new Map(); // key -> { loading, entry, staged, diff }
+// 勾选待一起存储的文件路径集合：跨分区按路径去重（同一文件暂存+工作区只算一份）；
+// 状态刷新时由 applyStatus 对账，消失的路径自动出清
+export const selected = new Set();
 export let busy = false;
 export let lastStatusJson = "";
 export let treeMode = lsGet("zcode-git.view") === "tree";
