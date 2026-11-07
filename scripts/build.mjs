@@ -12,6 +12,22 @@ const plugin = path.join(root, "plugins", "git");
 const manifest = JSON.parse(await readFile(path.join(plugin, ".zcode-plugin", "plugin.json"), "utf8"));
 const VERSION_DEFINE = { __APP_VERSION__: JSON.stringify(manifest.version) };
 
+// 仓库根 marketplace.json（宿主 git 市场源只认这份清单）的版本与描述自动对齐 plugin.json：
+// 曾因手工漏改长期停在 0.5.0，导致市场/GitHub 下载显示旧版本。icon/displayName 仍归清单自己管。
+const marketPath = path.join(root, "marketplace.json");
+const market = JSON.parse(await readFile(marketPath, "utf8"));
+const marketEntry = market.plugins?.find((x) => x.name === manifest.name);
+if (marketEntry) {
+  const before = JSON.stringify(marketEntry);
+  marketEntry.version = manifest.version;
+  marketEntry.description = manifest.description;
+  marketEntry.description_i18n = manifest.description_i18n;
+  if (JSON.stringify(marketEntry) !== before) {
+    await writeFile(marketPath, JSON.stringify(market, null, 2) + "\n");
+    console.log("market -> marketplace.json synced to", manifest.version);
+  }
+}
+
 // --- server -----------------------------------------------------------------
 await esbuild.build({
   entryPoints: [path.join(plugin, "server", "server.mjs")],

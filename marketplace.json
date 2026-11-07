@@ -5,14 +5,15 @@
       "name": "git",
       "source": "./plugins/git",
       "icon": "https://raw.githubusercontent.com/wudx/zcode-plugin-git/main/plugins/git/icon.png",
-      "version": "0.5.0",
-      "description": "Git workbench side panel: review staged and working-tree changes (list/tree, unified/side-by-side diff), stage/unstage/discard, pull, push, stash, commit, and AI commit messages.",
+      "version": "0.9.6",
+      "description": "Git workbench side panel: review staged and working-tree changes (list or tree view, unified or side-by-side diff), stage/unstage/discard files, switch/delete/merge branches (right-click a branch to merge it into the current one, create a new branch from it, or delete it), browse commit history and expand any commit's full diff, pull, push, stash, preview modified images side-by-side (old vs new), and generate AI commit messages with a custom prompt.",
       "displayName": "Git 工具",
       "displayName_i18n": {
         "zh-CN": "Git 工具"
       },
       "description_i18n": {
-        "zh-CN": "Git 工作台侧栏面板：列表/树结构查看暂存与工作区修改（统一/并排 diff），暂存/取消/撤销，图片新旧版并排比对，拉取/推送与 stash，AI 生成提交信息并提交"
+        "en": "Git workbench side panel: review staged and working-tree changes with list/tree views and unified/side-by-side diffs, stage/unstage/discard files, switch or delete branches (local, remote-tracked or newly created), merge any branch into the current one via right-click, browse commit history and expand any commit's diff (with load-more paging), pull and push, stash (pop/apply), write and run commits, and generate AI commit messages with an optional custom prompt.",
+        "zh-CN": "Git 工作台侧栏面板：以列表/树结构查看暂存区与工作区修改（统一/并排 diff），支持暂存、取消暂存、撤销、全部暂存/取消，切换/删除分支（本地/远程建跟踪/新建），右键分支可合并到当前分支、从其新建分支或删除，查看提交历史并展开单条提交的 diff（支持加载更多），图片文件旧版/新版并排预览比对，拉取与推送远程更新，存储/恢复/应用 stash，一键提交，并可附加自定义提示词用 AI 生成提交信息；面板自动跟踪外部文件改动。"
       }
     }
   ]
