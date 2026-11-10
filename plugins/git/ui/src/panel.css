@@ -591,6 +591,10 @@ body {
 }
 .commit-diff { display: flex; flex-direction: column; gap: 2px; padding: 0 2px 3px; }
 .commit-diff-bar { display: flex; justify-content: flex-end; gap: 4px; }
+/* 展开提交后的文件条：左计数、右切换列表/树与收起按钮 */
+.commit-files-bar { justify-content: space-between; align-items: center; }
+.commit-files-count { font-size: 11px; color: var(--git-fg-dim); }
+.commit-file-list { display: flex; flex-direction: column; gap: 1px; }
 .commit-diff-body {
   max-height: 260px;
   overflow: auto;

@@ -18,7 +18,7 @@ const BADGE = {
   C: ["C", "b-ren"], T: ["T", "b-mod"], "?": ["?", "b-new"], U: ["U", "b-conf"],
 };
 
-function badgeEl(code) {
+export function badgeEl(code) {
   const [ch, cls] = BADGE[code] || [code, "b-mod"];
   return el("span", "badge " + cls, ch);
 }
@@ -120,8 +120,11 @@ export function buildTree(entries) {
   return root;
 }
 
-export function treeEl(entries, staged) {
-  const area = staged ? "s" : "w";
+// makeRow：文件行工厂（默认工作区行 rowEl），area：折叠目录的 key 前缀；
+// 历史菜单复用树结构时传自己的行工厂与 "h" 前缀，避免折叠状态和工作区串扰
+export function treeEl(entries, staged, makeRow = null, area = null) {
+  const ar = area || (staged ? "s" : "w");
+  const mkFile = makeRow || ((e, depth) => rowEl(e, staged, depth));
   const box = el("div", "tree");
   const rec = (node, basePath, depth) => {
     for (const dname of [...node.dirs.keys()].sort()) {
@@ -134,7 +137,7 @@ export function treeEl(entries, staged) {
         target = target.dirs.get(only);
       }
       const dirPath = basePath ? `${basePath}/${name}` : name;
-      const dkey = `${area}:${dirPath}`;
+      const dkey = `${ar}:${dirPath}`;
       const collapsed = collapsedDirs.has(dkey);
       const drow = document.createElement("div");
       drow.className = "tree-dir";
@@ -152,7 +155,7 @@ export function treeEl(entries, staged) {
       if (!collapsed) rec(target, dirPath, depth + 1);
     }
     for (const f of [...node.files].sort((a, b) => String(a._name).localeCompare(String(b._name)))) {
-      box.appendChild(rowEl(f, staged, depth));
+      box.appendChild(mkFile(f, depth));
     }
   };
   rec(buildTree(entries), "", 0);
