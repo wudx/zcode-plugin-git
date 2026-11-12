@@ -621,7 +621,18 @@ body {
 .tree-dir:hover { background: var(--git-bg-soft); }
 .chev { flex: none; font-size: 9px; color: var(--git-fg-dim); transition: transform 0.15s ease; }
 .chev.collapsed { transform: rotate(-90deg); }
-.tree-dir-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-dir-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 目录行批量操作（暂存/取消暂存/撤销）：与 .row-btns 同款，悬停/聚焦该行时浮现 */
+.tree-btns {
+  display: flex;
+  gap: 4px;
+  flex: none;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.tree-dir:hover .tree-btns,
+.tree-dir:focus-within .tree-btns { opacity: 1; pointer-events: auto; }
 
 /* diff toolbar + split view */
 .diff-bar {

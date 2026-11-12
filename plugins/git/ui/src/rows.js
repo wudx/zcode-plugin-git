@@ -87,7 +87,7 @@ export function rowEl(entry, staged, depth = 0) {
     if (entry.unmerged) {
       btns.appendChild(iconBtn({ icon: ICONS.plus, title: t.resolveMark, onClick: () => runAction(() => callTool("git_stage", { paths: [entry.path] })) }));
     } else if (staged) {
-      btns.appendChild(iconBtn({ icon: ICONS.minus, title: t.unstage, onClick: () => runAction(() => callTool("git_stage", { paths: [entry.path] })) }));
+      btns.appendChild(iconBtn({ icon: ICONS.minus, title: t.unstage, onClick: () => runAction(() => callTool("git_unstage", { paths: [entry.path] })) }));
     } else if (isUntracked) {
       btns.appendChild(iconBtn({ icon: ICONS.plus, title: t.stage, cls: "primary", onClick: () => runAction(() => callTool("git_stage", { paths: [entry.path] })) }));
       btns.appendChild(iconBtn({ icon: ICONS.trash, title: t.deleteFile, cls: "danger", onClick: askConfirm }));
@@ -120,6 +120,54 @@ export function buildTree(entries) {
   return root;
 }
 
+// 收集目录子树内全部文件路径（含嵌套子目录，文件节点存的是完整 path）
+function collectPaths(node, out = []) {
+  for (const f of node.files) out.push(f.path);
+  for (const c of node.dirs.values()) collectPaths(c, out);
+  return out;
+}
+
+/**
+ * 目录行的批量操作：对子树内全部文件执行 暂存/取消暂存/撤销，与分区头、单文件行同款。
+ * 仅工作区/暂存区树提供（历史文件树传入自定义行工厂时不显示）；撤销属危险操作，走行内二次确认。
+ */
+function dirBtnsEl(node, staged) {
+  const paths = collectPaths(node);
+  const box = el("div", "tree-btns");
+  box.addEventListener("click", (e) => e.stopPropagation()); // 不触发目录折叠/展开
+  let confirming = false;
+  const renderBtns = () => {
+    box.replaceChildren();
+    if (confirming) {
+      confirmUI(box, {
+        question: t.confirmDiscardDir.replace("{n}", String(paths.length)),
+        yesLabel: t.confirmYes,
+        cancelLabel: t.cancel,
+        onYes: () => {
+          confirming = false;
+          runAction(() => callTool("git_discard", { paths }));
+        },
+        onCancel: () => {
+          confirming = false;
+          renderBtns();
+        },
+      });
+      return;
+    }
+    if (staged) {
+      box.appendChild(iconBtn({ icon: ICONS.minus, title: t.unstage, onClick: () => runAction(() => callTool("git_unstage", { paths })) }));
+    } else {
+      box.appendChild(iconBtn({ icon: ICONS.plus, title: t.stage, cls: "primary", onClick: () => runAction(() => callTool("git_stage", { paths })) }));
+      box.appendChild(iconBtn({ icon: ICONS.undo, title: t.discard, cls: "danger", onClick: () => {
+        confirming = true;
+        renderBtns();
+      } }));
+    }
+  };
+  renderBtns();
+  return box;
+}
+
 // makeRow：文件行工厂（默认工作区行 rowEl），area：折叠目录的 key 前缀；
 // 历史菜单复用树结构时传自己的行工厂与 "h" 前缀，避免折叠状态和工作区串扰
 export function treeEl(entries, staged, makeRow = null, area = null) {
@@ -146,6 +194,7 @@ export function treeEl(entries, staged, makeRow = null, area = null) {
       const label = el("span", "tree-dir-name", name);
       label.title = dirPath;
       drow.append(chev, label);
+      if (!makeRow) drow.appendChild(dirBtnsEl(target, staged));
       drow.addEventListener("click", () => {
         if (collapsedDirs.has(dkey)) collapsedDirs.delete(dkey);
         else collapsedDirs.add(dkey);
